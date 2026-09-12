@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    API / PRESENTATION LAYER - controllers, middleware, filters, and the
+    composition root where every interface is bound to its implementation.
+
+    This is the ONLY project that references Infrastructure, and it does so
+    purely to call AddInfrastructure(...) at startup. Controllers depend on
+    Application abstractions, never on EF Core.
+  -->
+
+  <PropertyGroup>
+    <!-- Required by Microsoft.AspNetCore.Mvc.Testing so the integration test
+         project can locate this assembly's content root. -->
+    <PreserveCompilationContext>true</PreserveCompilationContext>
+    <UserSecretsId>library-management-assessment-1</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- OpenAPI document generation (built-in, ASP.NET Core 9+) -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- Swagger UI only - it renders the document produced above -->
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+
+    <!-- AddDbContextCheck<T>() for the readiness probe. -->
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Library.Application\Library.Application.csproj" />
+    <ProjectReference Include="..\Library.Infrastructure\Library.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

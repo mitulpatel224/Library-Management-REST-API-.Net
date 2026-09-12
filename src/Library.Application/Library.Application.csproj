@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    APPLICATION LAYER - use cases, DTOs, validators, and the ABSTRACTIONS
+    (IBookRepository, IClock, IFileStorage, ITokenService, ...) that
+    Library.Infrastructure implements.
+
+    Note what is absent: no EF Core reference. This layer talks about
+    persistence through interfaces it owns, which is Dependency Inversion
+    enforced by the compiler rather than by good intentions.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="Mapster" />
+    <PackageReference Include="Mapster.DependencyInjection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Library.Domain\Library.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

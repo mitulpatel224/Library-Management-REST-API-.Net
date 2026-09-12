@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    UNIT TESTS - fast, no I/O, no database, no HTTP.
+    References Domain and Application only. If a test here needs a database,
+    it belongs in Library.IntegrationTests instead.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Library.Domain\Library.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Library.Application\Library.Application.csproj" />
+  </ItemGroup>
+
+</Project>

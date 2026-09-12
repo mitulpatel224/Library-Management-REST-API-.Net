@@ -1,0 +1,95 @@
+<Project>
+
+  <!--
+    Central Package Management (CPM).
+
+    With this enabled, individual .csproj files reference a package by NAME only:
+        <PackageReference Include="CsvHelper" />
+    and the version is resolved from the single <PackageVersion> entry below.
+
+    Why: in a multi-project solution it is otherwise trivially easy for two
+    projects to drift onto different versions of the same package. That produces
+    binding redirects, "works on my machine" bugs, and a painful upgrade story.
+    One file, one version, whole solution.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!-- ===================== Persistence / ORM ===================== -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+    <!-- Supplies AddDbContextCheck<T>() for the /health/ready endpoint. -->
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.12" />
+  </ItemGroup>
+
+  <!-- ===================== Application concerns ===================== -->
+  <ItemGroup>
+    <!-- FluentValidation 12.x. NOTE: the old FluentValidation.AspNetCore package
+         is deprecated (its MVC auto-validation was removed by the author).
+         The supported path is the core package + DI extensions, with validation
+         invoked explicitly from a pipeline/filter. -->
+    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+
+    <PackageVersion Include="Mapster" Version="10.0.12" />
+    <PackageVersion Include="Mapster.DependencyInjection" Version="10.0.12" />
+  </ItemGroup>
+
+  <!-- ===================== Infrastructure ===================== -->
+  <ItemGroup>
+    <PackageVersion Include="CsvHelper" Version="33.1.0" />
+    <!-- Supplies OptionsBuilder<T>.ValidateDataAnnotations(). The [Required] and
+         [Range] attributes on an options class do nothing without it - the
+         attributes exist in the base library, but the validator that reads them
+         ships separately. -->
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.12" />
+  </ItemGroup>
+
+  <!-- ===================== API / hosting ===================== -->
+  <ItemGroup>
+    <!-- OpenAPI document generation is built into ASP.NET Core 9+.
+         Swashbuckle is used for the UI ONLY, pointed at /openapi/v1.json. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.22.0" />
+    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="10.0.12" />
+
+    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- ===================== Testing ===================== -->
+  <ItemGroup>
+    <!-- xUnit v3, not v2. The .NET 10 template still scaffolds v2, but v3 is the
+         actively developed line and it fixes a concrete problem here: v2's
+         IAsyncLifetime.DisposeAsync() returns Task, which collides with the
+         IAsyncDisposable.DisposeAsync() (ValueTask) that WebApplicationFactory
+         already implements. v3's IAsyncLifetime extends IAsyncDisposable and uses
+         ValueTask, so the integration-test factory composes cleanly. v3 also adds
+         TestContext.Current.CancellationToken for cooperative test cancellation. -->
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <!-- Code coverage for Microsoft.Testing.Platform. Replaces coverlet.collector,
+         which is a VSTest data collector and does not run under MTP. -->
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <PackageVersion Include="NSubstitute" Version="6.2.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+  </ItemGroup>
+
+  <!--
+    Deliberately NOT referenced:
+      AspNetCoreRateLimit - ASP.NET Core has had first-party rate limiting since
+      .NET 7 (Microsoft.AspNetCore.RateLimiting, built into the shared framework).
+      Phase 8 uses builder.Services.AddRateLimiter(...) instead of a third-party
+      dependency.
+  -->
+
+</Project>

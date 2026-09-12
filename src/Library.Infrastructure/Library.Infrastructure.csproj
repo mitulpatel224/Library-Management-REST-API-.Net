@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    INFRASTRUCTURE LAYER - the implementations of everything Library.Application
+    declares as an interface: EF Core DbContext and repositories, file I/O,
+    clock, token generation, password hashing.
+
+    Both database providers are referenced here so the provider can be chosen at
+    runtime from configuration (Database:Provider). Only THIS project knows a
+    database engine exists.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!-- CSV import (Phase 6) and CSV export (Phase 7). -->
+    <PackageReference Include="CsvHelper" />
+
+    <!-- Enables ValidateDataAnnotations() on DatabaseOptions, so a missing
+         connection string fails at startup rather than on first request. -->
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+
+    <!-- PasswordHasher<T> for Phase 5. This is the identity *primitives* package,
+         not full ASP.NET Core Identity - we keep our own user tables. -->
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Library.Application\Library.Application.csproj" />
+  </ItemGroup>
+
+</Project>

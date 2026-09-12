@@ -1,0 +1,56 @@
+<Project>
+
+  <!--
+    Shared MSBuild settings applied to EVERY project in the solution.
+    MSBuild walks up the directory tree from each .csproj and imports the first
+    Directory.Build.props it finds, so defining these once here keeps the
+    individual project files almost empty.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Nullable reference types on everywhere. This is a design decision, not a
+         style one: it moves an entire class of NullReferenceException from
+         runtime to compile time. -->
+    <Nullable>enable</Nullable>
+
+    <!-- A warning you are allowed to ignore is a warning you will ignore.
+         Failing the build keeps the codebase honest. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Generate XML docs so Swagger/OpenAPI can surface summaries on endpoints
+         and DTOs. CS1591 ("missing XML comment") is disabled so this does not
+         force a doc comment on every single member. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Test projects are not packable and do not need XML documentation. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- xUnit v3 test projects are executables: each one hosts its own test
+         runner rather than being loaded by an external one. -->
+    <OutputType>Exe</OutputType>
+
+    <!-- CA1707 forbids underscores in member names. Test methods are the one
+         place that rule is actively harmful: Skip_is_derived_from_page_and_size
+         reads as a sentence in the test output, which is the entire point of a
+         test name. The rule stays enforced everywhere else in the solution. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+
+    <!-- Opts `dotnet test` into Microsoft.Testing.Platform. Without it the .NET 10
+         SDK still routes through the retired VSTest bridge and fails outright. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+</Project>

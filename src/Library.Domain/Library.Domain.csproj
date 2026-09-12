@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THE INNERMOST LAYER.
+
+    This project has NO package references and NO project references, and that is
+    not an oversight - it is the architecture. Entities, value objects, domain
+    events, and domain exceptions live here and know nothing about EF Core,
+    ASP.NET Core, or any database.
+
+    If you ever feel the need to add a reference here, the design has gone wrong:
+    define an interface in Library.Application instead and implement it in
+    Library.Infrastructure.
+  -->
+
+</Project>
