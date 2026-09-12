@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# Line-ending normalisation.
+#
+# Without this file, line endings are whatever each developer's local
+# core.autocrlf happens to be. The result is the classic cross-platform failure:
+# someone commits on a machine configured differently, and a diff reports every
+# line of a file as changed when nothing actually was. Review becomes
+# impossible and `git blame` stops being useful.
+#
+# `text=auto` tells git to store text files with LF in the repository and check
+# them out with the platform's native endings. The repository becomes the single
+# source of truth, and the working copy adapts.
+# ---------------------------------------------------------------------------
+* text=auto
+
+# ---------------------------------------------------------------------------
+# .NET source and project files.
+#
+# Pinned to CRLF on checkout because Visual Studio and the .NET tooling write
+# CRLF on Windows regardless. Declaring it explicitly means the tooling and git
+# agree, rather than the tooling silently "modifying" files it opened.
+# ---------------------------------------------------------------------------
+*.cs        text eol=crlf diff=csharp
+*.csproj    text eol=crlf
+*.slnx      text eol=crlf
+*.sln       text eol=crlf
+*.props     text eol=crlf
+*.targets   text eol=crlf
+*.config    text eol=crlf
+*.razor     text eol=crlf
+*.cshtml    text eol=crlf
+
+# ---------------------------------------------------------------------------
+# Cross-platform text. LF always: these are read by tools that break on CRLF.
+# A shell script with CRLF endings fails with a confusing "bad interpreter"
+# error, and YAML parsers are similarly unforgiving.
+# ---------------------------------------------------------------------------
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.editorconfig text eol=lf
+Dockerfile  text eol=lf
+*.http      text eol=lf
+
+# CSV import/export samples. LF keeps the fixtures byte-identical across
+# platforms, which matters because Phase 6 and 7 tests assert on their content.
+*.csv       text eol=lf
+*.sql       text eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary files. Marking these explicitly stops git attempting line-ending
+# conversion (which would corrupt them) and stops it printing useless
+# line-by-line diffs.
+# ---------------------------------------------------------------------------
+*.db        binary
+*.db-shm    binary
+*.db-wal    binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.dll       binary
+*.exe       binary
+*.pfx       binary
+*.snk       binary
+
+# ---------------------------------------------------------------------------
+# Generated code. Collapsed in GitHub diffs and excluded from language stats,
+# so a regenerated EF migration does not drown a pull request that also
+# contains hand-written changes.
+# ---------------------------------------------------------------------------
+**/Persistence/Migrations/*.cs linguist-generated=true
