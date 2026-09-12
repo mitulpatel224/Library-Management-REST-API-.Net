@@ -1,5 +1,6 @@
 using Library.Application.Books;
 using Library.Application.Books.Dtos;
+using Library.Application.Books.Requests;
 using Library.Application.Common.Models;
 using Microsoft.AspNetCore.Mvc;
 
@@ -126,5 +127,98 @@ public sealed class BooksController : ControllerBase
             await _bookService.GetCopiesAsync(id, cancellationToken);
 
         return Ok(copies);
+    }
+
+    // =======================================================================
+    // Writes
+    // =======================================================================
+
+    /// <summary>Catalogues a new book.</summary>
+    /// <remarks>
+    /// The ISBN may be sent hyphenated or not; it is normalised and its check
+    /// digit verified. `authorIds` order becomes the credit order.
+    /// </remarks>
+    /// <param name="request">The book to create.</param>
+    /// <param name="cancellationToken">Cancelled when the client disconnects.</param>
+    /// <response code="201">Created. The <c>Location</c> header points at the new book.</response>
+    /// <response code="409">A book with this ISBN is already catalogued.</response>
+    /// <response code="422">Validation failed, or a referenced id does not exist.</response>
+    [HttpPost(Name = "CreateBook")]
+    [ProducesResponseType<BookDetailDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<BookDetailDto>> Create(
+        [FromBody] CreateBookRequest request,
+        CancellationToken cancellationToken)
+    {
+        BookDetailDto created = await _bookService.CreateAsync(request, cancellationToken);
+
+        // 201 with a Location header, per REST convention - the client learns
+        // where the new resource lives without having to construct the URL.
+        return CreatedAtRoute("GetBookById", new { id = created.Id }, created);
+    }
+
+    /// <summary>Replaces a book's details, authors and genres.</summary>
+    /// <remarks>
+    /// A full replacement, not a patch: the author and genre lists sent here
+    /// become the complete lists. Sending the same body twice is idempotent.
+    /// <para>
+    /// The ISBN cannot be changed — it is the natural key, so altering it would
+    /// make this a different book. Delete and re-create instead.
+    /// </para>
+    /// </remarks>
+    /// <response code="200">The updated book.</response>
+    /// <response code="404">No book with this id exists.</response>
+    /// <response code="422">Validation failed, or a referenced id does not exist.</response>
+    [HttpPut("{id:int}", Name = "UpdateBook")]
+    [ProducesResponseType<BookDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<BookDetailDto>> Update(
+        int id,
+        [FromBody] UpdateBookRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _bookService.UpdateAsync(id, request, cancellationToken));
+    }
+
+    /// <summary>Removes a book and all of its copies.</summary>
+    /// <remarks>
+    /// Refused while any copy is on loan — the cascade would otherwise delete a
+    /// copy a member is currently holding.
+    /// </remarks>
+    /// <response code="204">Deleted.</response>
+    /// <response code="404">No book with this id exists.</response>
+    /// <response code="409">One or more copies are on loan.</response>
+    [HttpDelete("{id:int}", Name = "DeleteBook")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
+    {
+        await _bookService.DeleteAsync(id, cancellationToken);
+
+        return NoContent();
+    }
+
+    /// <summary>Adds a physical copy to a book.</summary>
+    /// <remarks>Barcodes must be unique across the entire library, not just within this title.</remarks>
+    /// <response code="201">The new copy.</response>
+    /// <response code="404">No book with this id exists.</response>
+    /// <response code="409">The barcode is already in use.</response>
+    /// <response code="422">Validation failed.</response>
+    [HttpPost("{id:int}/copies", Name = "AddBookCopy")]
+    [ProducesResponseType<BookCopyDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<BookCopyDto>> AddCopy(
+        int id,
+        [FromBody] AddBookCopyRequest request,
+        CancellationToken cancellationToken)
+    {
+        BookCopyDto copy = await _bookService.AddCopyAsync(id, request, cancellationToken);
+
+        return CreatedAtRoute("GetBookCopies", new { id }, copy);
     }
 }

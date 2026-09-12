@@ -49,6 +49,8 @@ public static class DependencyInjection
         // and at startup this project supplies what Application asked for.
         services.AddScoped<IBookRepository, BookRepository>();
 
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+
         services.AddScoped<DatabaseSeeder>();
 
         return services;

@@ -43,4 +43,49 @@ public interface IBookService
     Task<IReadOnlyList<BookCopyDto>> GetCopiesAsync(
         int bookId,
         CancellationToken cancellationToken = default);
+
+    // -----------------------------------------------------------------------
+    // Write use cases
+    // -----------------------------------------------------------------------
+
+    /// <summary>Catalogues a new book.</summary>
+    /// <exception cref="Domain.Exceptions.ConflictException">A book with this ISBN exists.</exception>
+    /// <exception cref="Domain.Exceptions.BusinessRuleViolationException">
+    /// A referenced category, publisher, author or genre does not exist.
+    /// </exception>
+    Task<BookDetailDto> CreateAsync(
+        Requests.CreateBookRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces a book's details, authors and genres.</summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">No book with this id.</exception>
+    Task<BookDetailDto> UpdateAsync(
+        int id,
+        Requests.UpdateBookRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a book and all of its copies.</summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">No book with this id.</exception>
+    /// <exception cref="Domain.Exceptions.ConflictException">A copy is on loan.</exception>
+    Task DeleteAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds a physical copy to a book.</summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">No book with this id.</exception>
+    /// <exception cref="Domain.Exceptions.ConflictException">The barcode is already in use.</exception>
+    Task<BookCopyDto> AddCopyAsync(
+        int bookId,
+        Requests.AddBookCopyRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Updates a copy's condition or shelf location.</summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">No copy with this id.</exception>
+    Task<BookCopyDto> UpdateCopyAsync(
+        int copyId,
+        Requests.UpdateBookCopyRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a physical copy.</summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">No copy with this id.</exception>
+    /// <exception cref="Domain.Exceptions.ConflictException">The copy is on loan.</exception>
+    Task DeleteCopyAsync(int copyId, CancellationToken cancellationToken = default);
 }

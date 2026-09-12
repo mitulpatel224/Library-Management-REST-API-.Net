@@ -1,3 +1,4 @@
+using Library.Api.Filters;
 using Library.Api.Middleware;
 using Library.Api.OpenApi;
 using Library.Application;
@@ -41,7 +42,33 @@ try
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
 
-    builder.Services.AddControllers();
+    // The validation filter runs every FluentValidation validator for every
+    // action argument that has one, so an unvalidated request is impossible
+    // rather than merely unlikely.
+    builder.Services
+        .AddControllers(options => options.Filters.Add<ValidationFilter>())
+        .AddJsonOptions(options =>
+        {
+            // -------------------------------------------------------------
+            // Reject JSON properties the request DTO does not declare.
+            //
+            // By default System.Text.Json SILENTLY DISCARDS unknown members.
+            // Combined with narrow request DTOs - which exist to prevent mass
+            // assignment - that produces a genuinely misleading API: a caller
+            // PUTs a full object back with a changed `barcode`, receives 200,
+            // and reasonably concludes the barcode changed. It did not.
+            //
+            // The DTO was right to ignore it; the 200 was wrong. Disallow turns
+            // that into a 400 naming the offending property, so the contract is
+            // enforced out loud instead of silently.
+            //
+            // This is strict, and deliberately so: quietly accepting input you
+            // do not honour is how clients end up depending on behaviour that
+            // was never real.
+            // -------------------------------------------------------------
+            options.JsonSerializerOptions.UnmappedMemberHandling =
+                System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow;
+        });
 
     // ProblemDetails (RFC 9457) as the uniform error shape for the whole API.
     // Registering it also converts framework-generated failures - 404 on an

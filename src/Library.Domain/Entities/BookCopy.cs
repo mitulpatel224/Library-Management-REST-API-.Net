@@ -137,8 +137,30 @@ public sealed class BookCopy : AuditableEntity
         Status = CopyStatus.Available;
     }
 
-    public void UpdateDetails(CopyCondition condition, string? shelfLocation)
+    /// <summary>
+    /// Updates the copy's barcode, condition and shelf location.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The barcode is normalised exactly as in <see cref="Create"/> — trimmed and
+    /// upper-cased — so a re-label cannot produce a value that fails to match the
+    /// unique index by case alone.
+    /// </para>
+    /// <para>
+    /// Uniqueness across the library cannot be checked here: this entity can only
+    /// see itself. The service checks it for a good message, and
+    /// <c>IX_BookCopies_Barcode</c> enforces it.
+    /// </para>
+    /// </remarks>
+    public void UpdateDetails(string barcode, CopyCondition condition, string? shelfLocation)
     {
+        if (string.IsNullOrWhiteSpace(barcode))
+        {
+            throw new BusinessRuleViolationException(
+                "copy.barcode_required", "Copy barcode is required.");
+        }
+
+        Barcode = barcode.Trim().ToUpperInvariant();
         Condition = condition;
         ShelfLocation = shelfLocation?.Trim();
     }

@@ -376,4 +376,148 @@ public sealed class BookRepository : IBookRepository
                 b => EF.Property<string>(b, Book.IsbnPropertyName) == normalized,
                 cancellationToken);
     }
+
+    // =======================================================================
+    // Write operations
+    // =======================================================================
+
+    /// <summary>
+    /// Loads a book with everything a write use case needs to mutate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Note the absence of <c>AsNoTracking</c> — the exact opposite of the read
+    /// path. Change tracking is what lets a caller mutate the entity and have
+    /// <c>SaveChanges</c> work out the UPDATE, and it is what makes
+    /// <c>SetAuthors</c> clearing the collection translate into DELETEs on the
+    /// join table.
+    /// </para>
+    /// <para>
+    /// <c>AsSplitQuery</c> because three collection <c>Include</c>s in one
+    /// statement produce a cartesian explosion: a book with 4 authors, 2 genres
+    /// and 5 copies returns 4 × 2 × 5 = 40 rows, each repeating every book
+    /// column. Split queries issue one statement per collection instead. The
+    /// trade-off is that the reads are no longer in a single snapshot, which is
+    /// irrelevant here because the caller is about to take a write lock anyway.
+    /// </para>
+    /// </remarks>
+    public async Task<Book?> GetEntityAsync(int id, CancellationToken cancellationToken = default)
+    {
+        return await _context.Books
+            .Include(b => b.BookAuthors)
+            .Include(b => b.BookGenres)
+            .Include(b => b.Copies)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+    }
+
+    public async Task<BookCopy?> GetCopyEntityAsync(
+        int copyId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.BookCopies
+            .FirstOrDefaultAsync(c => c.Id == copyId, cancellationToken);
+    }
+
+    // These only stage changes in the change tracker. Nothing reaches the
+    // database until IUnitOfWork.SaveChangesAsync is called, which is what lets
+    // one use case span several mutations in a single transaction.
+    public void Add(Book book) => _context.Books.Add(book);
+
+    public void Remove(Book book) => _context.Books.Remove(book);
+
+    public void RemoveCopy(BookCopy copy) => _context.BookCopies.Remove(copy);
+
+    public async Task<bool> CategoryExistsAsync(
+        int categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.Categories
+            .AsNoTracking()
+            .AnyAsync(c => c.Id == categoryId, cancellationToken);
+    }
+
+    public async Task<bool> PublisherExistsAsync(
+        int publisherId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.Publishers
+            .AsNoTracking()
+            .AnyAsync(p => p.Id == publisherId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Finds which of the supplied author ids do not exist.
+    /// </summary>
+    /// <remarks>
+    /// One query for the whole set, not one per id. The database returns the ids
+    /// that DO exist and the difference is computed in memory over a handful of
+    /// integers — cheaper and simpler than expressing "not in" per element.
+    /// <para>
+    /// Reporting every missing id at once means the caller fixes all of them in
+    /// one round trip, rather than discovering them one failed request at a time.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<int>> FindMissingAuthorIdsAsync(
+        IReadOnlyCollection<int> authorIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (authorIds is null || authorIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<int> existing = await _context.Authors
+            .AsNoTracking()
+            .Where(a => authorIds.Contains(a.Id))
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
+
+        return [.. authorIds.Except(existing)];
+    }
+
+    public async Task<bool> BarcodeExistsAsync(
+        string barcode,
+        int? excludeCopyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(barcode))
+        {
+            return false;
+        }
+
+        // Upper-cased to match BookCopy.Create/UpdateDetails, which normalise on
+        // the way in - otherwise a re-label differing only in case would slip
+        // past this check and then fail at the index.
+        string normalized = barcode.Trim().ToUpperInvariant();
+
+        IQueryable<BookCopy> query = _context.BookCopies.AsNoTracking();
+
+        if (excludeCopyId is > 0)
+        {
+            // Exclude the row being edited, so keeping a barcode unchanged does
+            // not conflict with itself.
+            query = query.Where(c => c.Id != excludeCopyId);
+        }
+
+        return await query.AnyAsync(c => c.Barcode == normalized, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<int>> FindMissingGenreIdsAsync(
+        IReadOnlyCollection<int> genreIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (genreIds is null || genreIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<int> existing = await _context.Genres
+            .AsNoTracking()
+            .Where(g => genreIds.Contains(g.Id))
+            .Select(g => g.Id)
+            .ToListAsync(cancellationToken);
+
+        return [.. genreIds.Except(existing)];
+    }
 }

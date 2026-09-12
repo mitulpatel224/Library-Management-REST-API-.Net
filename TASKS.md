@@ -60,17 +60,23 @@ done.
 
 **Write side**
 
-- [ ] `POST /api/books` — 201, or 409 on duplicate ISBN
-- [ ] `PUT /api/books/{id}` — 200 / 404
-- [ ] `DELETE /api/books/{id}` — 204, or 409 when copies are on loan
-- [ ] `POST /api/books/{id}/copies` — 201, or 409 on duplicate barcode
-- [ ] `DELETE /api/copies/{id}` — 204
-- [ ] FluentValidation validators for every write request
-- [ ] Validation pipeline wiring (filter or explicit invocation)
+- [x] `POST /api/books` — 201, or 409 on duplicate ISBN
+- [x] `PUT /api/books/{id}` — 200 / 404
+- [x] `DELETE /api/books/{id}` — 204, or 409 when copies are on loan
+- [x] `POST /api/books/{id}/copies` — 201, or 409 on duplicate barcode
+- [x] `DELETE /api/copies/{id}` — 204
+- [x] `PUT /api/copies/{id}` — 200, or 409 on duplicate barcode (re-labelling)
+- [x] FluentValidation validators for every write request
+- [x] Validation pipeline wiring — global `ValidationFilter`
+- [x] `IUnitOfWork` — one transaction per use case; index violation -> 409
+- [x] Strict JSON — unknown properties rejected with 400, not silently dropped
 - [ ] Author / Genre / Category / Publisher lookup endpoints
 - [ ] Unit tests for `BookService` write paths
 - [ ] Integration tests for the book endpoints
 - [x] `docs/phases/phase-02.md` (read side)
+- [ ] `docs/api-contract.md` — **stale**: still lists the write endpoints as
+      "planned", and does not cover the strict-JSON 400 or the editable barcode
+- [ ] `docs/phases/phase-02.md` — extend for the write side
 
 ## Phase 3 — Reader / Member APIs
 
@@ -150,7 +156,7 @@ done.
 - [x] `docs/data-flow.md` — sequence diagrams
 - [x] `docs/setup.md`
 - [x] `docs/database.md`
-- [x] `docs/api-contract.md`
+- [~] `docs/api-contract.md` — read side documented; write side stale
 - [ ] `docs/security.md`
 - [~] `docs/phases/` — 01 and 02 written; 03-08 pending
 
@@ -192,4 +198,7 @@ done.
 | 2026-09-12 | Sort whitelist of expression trees | A parameter cannot stand in for a column name, so no escaping makes interpolation safe. The input is *looked up*, never used to build SQL. | Dynamic LINQ / string interpolation |
 | 2026-09-12 | `Restrict` on Category FK, `Cascade` on copies | Deleting a category must not silently delete its books; a copy has no meaning without its title | Cascade everywhere |
 | 2026-09-12 | Seeder class, not `HasData` | `HasData` bakes demo rows into migrations and needs hard-coded keys; the seeder also runs data through domain validation | `HasData` in configurations |
+| 2026-09-12 | Strict JSON (`UnmappedMemberHandling.Disallow`) | System.Text.Json silently discards unknown members. Combined with narrow request DTOs that exist to prevent mass assignment, a caller could PUT a changed `barcode`, get 200, and reasonably believe it worked. The DTO was right to ignore it; the 200 was wrong. | Default lenient binding |
+| 2026-09-12 | Barcode editable via the normal copy update | A damaged or unreadable label needs re-issuing, and delete-and-recreate would discard the copy's loan history. Uniqueness is checked excluding the row being edited, so an unchanged barcode does not self-conflict. | Immutable barcode; a dedicated /relabel endpoint |
+| 2026-09-12 | `IUnitOfWork` over per-repository `SaveChanges` | Lets one use case span several mutations in a single transaction, and gives one place to translate a unique-index violation into a 409. Matches on provider ERROR NUMBERS, not message text, because messages are localised. | Committing inside each repository method |
 | 2026-09-12 | `DesignTimeDbContextFactory` | Keeps `Microsoft.EntityFrameworkCore.Design` out of the API project — it is build tooling, not a hosting concern | Referencing Design from `Library.Api` |

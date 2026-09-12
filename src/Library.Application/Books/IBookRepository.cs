@@ -1,10 +1,11 @@
 using Library.Application.Books.Dtos;
 using Library.Application.Common.Models;
+using Library.Domain.Entities;
 
 namespace Library.Application.Books;
 
 /// <summary>
-/// Read access to the book catalogue.
+/// Read and write access to the book catalogue.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -60,4 +61,72 @@ public interface IBookRepository
 
     /// <summary>True when a book with this ISBN already exists.</summary>
     Task<bool> IsbnExistsAsync(string isbn, CancellationToken cancellationToken = default);
+
+    // -----------------------------------------------------------------------
+    // Write operations.
+    //
+    // These return DOMAIN ENTITIES rather than DTOs, and that is correct: a
+    // write use case must invoke the entity's own methods (UpdateDetails,
+    // AddCopy, SetAuthors) so the invariants encoded there are enforced. A DTO
+    // has no behaviour to invoke.
+    //
+    // The rule that still holds is the one about IQueryable - that never
+    // escapes. Entities do, because Application references Domain by design.
+    //
+    // None of these commit. Committing is IUnitOfWork's job, so a single use
+    // case can make several changes inside one transaction.
+    // -----------------------------------------------------------------------
+
+    /// <summary>Loads a tracked book, with authors, genres and copies, for modification.</summary>
+    Task<Book?> GetEntityAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>Loads a tracked copy for modification.</summary>
+    Task<BookCopy?> GetCopyEntityAsync(int copyId, CancellationToken cancellationToken = default);
+
+    /// <summary>Stages a new book for insertion.</summary>
+    void Add(Book book);
+
+    /// <summary>Stages a book for deletion. Its copies cascade.</summary>
+    void Remove(Book book);
+
+    /// <summary>Stages a single copy for deletion.</summary>
+    void RemoveCopy(BookCopy copy);
+
+    /// <summary>True when the category exists.</summary>
+    Task<bool> CategoryExistsAsync(int categoryId, CancellationToken cancellationToken = default);
+
+    /// <summary>True when the publisher exists.</summary>
+    Task<bool> PublisherExistsAsync(int publisherId, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the supplied author ids that do not exist.</summary>
+    /// <remarks>
+    /// One query for the whole set rather than one per id, and it reports every
+    /// missing id at once — so a caller fixes all of them in a single round trip
+    /// instead of discovering them one failed request at a time.
+    /// </remarks>
+    Task<IReadOnlyList<int>> FindMissingAuthorIdsAsync(
+        IReadOnlyCollection<int> authorIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>True when this barcode is already in use anywhere in the library.</summary>
+    /// <remarks>
+    /// <para>
+    /// Book.AddCopy only checks within its own copies. Barcodes are unique
+    /// LIBRARY-WIDE, so this covers the case the entity cannot see.
+    /// </para>
+    /// <para>
+    /// <paramref name="excludeCopyId"/> is what makes this usable on an update:
+    /// without it, saving a copy whose barcode has NOT changed would match
+    /// itself and report a false conflict.
+    /// </para>
+    /// </remarks>
+    Task<bool> BarcodeExistsAsync(
+        string barcode,
+        int? excludeCopyId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the supplied genre ids that do not exist.</summary>
+    Task<IReadOnlyList<int>> FindMissingGenreIdsAsync(
+        IReadOnlyCollection<int> genreIds,
+        CancellationToken cancellationToken = default);
 }
