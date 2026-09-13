@@ -1,5 +1,6 @@
 using Library.Application.Books;
 using Library.Application.Common.Abstractions;
+using Library.Application.Loans;
 using Library.Application.Members;
 using Library.Infrastructure.Persistence;
 using Library.Infrastructure.Repositories;
@@ -50,6 +51,7 @@ public static class DependencyInjection
         // and at startup this project supplies what Application asked for.
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IMemberRepository, MemberRepository>();
+        services.AddScoped<ILoanRepository, LoanRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

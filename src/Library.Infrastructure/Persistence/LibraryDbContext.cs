@@ -73,12 +73,60 @@ public class LibraryDbContext : DbContext
 
     public DbSet<MembershipType> MembershipTypes => Set<MembershipType>();
 
+    public DbSet<Loan> Loans => Set<Loan>();
+
+    public DbSet<Fine> Fines => Set<Fine>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         // Discovers every IEntityTypeConfiguration<T> in Library.Infrastructure.
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+
+        ApplyActiveLoanIndexFilter(modelBuilder);
+    }
+
+    /// <summary>
+    /// Attaches the partial-index filter that enforces "one active loan per copy".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separated from <see cref="Configurations.LoanConfiguration"/> because
+    /// <c>HasFilter</c> takes raw SQL that EF Core emits verbatim — identifier
+    /// quoting included — and the two providers quote differently. The feature
+    /// exists in both (SQL Server "filtered index", SQLite "partial index"); only
+    /// the text differs.
+    /// </para>
+    /// <para>
+    /// An unknown provider throws rather than falling back to no filter. Without
+    /// the filter the index would be unique across <i>all</i> loans for a copy,
+    /// which would reject the second time any book was ever lent — a failure worth
+    /// hitting at startup rather than in front of a borrower.
+    /// </para>
+    /// </remarks>
+    private void ApplyActiveLoanIndexFilter(ModelBuilder modelBuilder)
+    {
+        string? provider = Database.ProviderName;
+
+        string filter = provider switch
+        {
+            not null when provider.Contains("Sqlite", StringComparison.Ordinal) =>
+                "\"ReturnedAt\" IS NULL",
+
+            not null when provider.Contains("SqlServer", StringComparison.Ordinal) =>
+                "[ReturnedAt] IS NULL",
+
+            _ => throw new InvalidOperationException(
+                $"No active-loan index filter is defined for provider '{provider}'. " +
+                "Add one before using this provider: without the filter the index " +
+                "would reject the second loan of every copy."),
+        };
+
+        modelBuilder.Entity<Loan>()
+            .HasIndex(l => l.BookCopyId)
+            .HasDatabaseName(Configurations.LoanConfiguration.ActiveLoanIndexName)
+            .HasFilter(filter);
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

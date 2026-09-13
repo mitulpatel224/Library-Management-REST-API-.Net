@@ -40,6 +40,7 @@ public static class DependencyInjection
         // concurrent request, which DbContext is explicitly not safe for.
         services.AddScoped<Books.IBookService, Books.BookService>();
         services.AddScoped<Members.IMemberService, Members.MemberService>();
+        services.AddScoped<Loans.ILoanService, Loans.LoanService>();
 
         return services;
     }
