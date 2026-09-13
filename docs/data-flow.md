@@ -286,7 +286,7 @@ would report a revision that never happened.
 
 ---
 
-## Issuing a loan (Phase 4 — planned)
+## Issuing a loan
 
 The flow that the whole system exists for, including the concurrency path.
 
@@ -344,7 +344,7 @@ The contrast between the two mechanisms is the point.
 
 ---
 
-## Returning a book and assessing a fine (Phase 4 — planned)
+## Returning a book and assessing a fine
 
 ```mermaid
 flowchart LR

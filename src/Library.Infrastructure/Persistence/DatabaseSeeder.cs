@@ -1,3 +1,4 @@
+using Library.Application.Common.Abstractions;
 using Library.Domain.Entities;
 using Library.Domain.Enums;
 using Library.Domain.ValueObjects;
@@ -30,11 +31,13 @@ namespace Library.Infrastructure.Persistence;
 public sealed partial class DatabaseSeeder
 {
     private readonly LibraryDbContext _context;
+    private readonly IClock _clock;
     private readonly ILogger<DatabaseSeeder> _logger;
 
-    public DatabaseSeeder(LibraryDbContext context, ILogger<DatabaseSeeder> logger)
+    public DatabaseSeeder(LibraryDbContext context, IClock clock, ILogger<DatabaseSeeder> logger)
     {
         _context = context;
+        _clock = clock;
         _logger = logger;
     }
 
@@ -353,6 +356,7 @@ public sealed partial class DatabaseSeeder
         LogSeedCompleted(seedBooks.Count, totalCopies);
 
         await SeedMembersAsync(cancellationToken);
+        await SeedLoansAsync(cancellationToken);
     }
 
     /// <summary>
@@ -455,6 +459,92 @@ public sealed partial class DatabaseSeeder
         LogMembersSeeded(seedMembers.Count, 4);
     }
 
+    /// <summary>
+    /// Seeds a realistic lending history: loans out, loans overdue, loans closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why an overdue loan is seeded deliberately.</b> Overdue behaviour is the
+    /// one part of this system that cannot be reached by calling the API and
+    /// waiting — a fresh loan is not late for a fortnight. Without a back-dated
+    /// row, the overdue report and the fine assessment are unreachable in a demo
+    /// and unverifiable by hand.
+    /// </para>
+    /// <para>
+    /// Dates are relative to <see cref="IClock"/> rather than hard-coded, so the
+    /// overdue loan is still overdue whenever the database is rebuilt. A fixed
+    /// date would be correct on the day it was written and wrong every day after.
+    /// </para>
+    /// <para>
+    /// Every loan is created through <c>Loan.Issue</c>, so the seed data obeys the
+    /// same invariants as real input — including marking each copy <c>OnLoan</c>,
+    /// which is what keeps <c>BookCopy.Status</c> honest about what is on the
+    /// shelf.
+    /// </para>
+    /// </remarks>
+    private async Task SeedLoansAsync(CancellationToken cancellationToken)
+    {
+        if (await _context.Loans.AnyAsync(cancellationToken))
+        {
+            return;
+        }
+
+        List<Member> members = await _context.Members
+            .Include(m => m.MembershipType)
+            .Where(m => m.Status == MemberStatus.Active)
+            .OrderBy(m => m.Id)
+            .Take(4)
+            .ToListAsync(cancellationToken);
+
+        List<BookCopy> copies = await _context.BookCopies
+            .Where(c => c.Status == CopyStatus.Available)
+            .OrderBy(c => c.Id)
+            .Take(6)
+            .ToListAsync(cancellationToken);
+
+        if (members.Count < 3 || copies.Count < 5)
+        {
+            return;
+        }
+
+        DateTimeOffset now = _clock.UtcNow;
+
+        // Out and not yet due - the ordinary case.
+        Loan active = Loan.Issue(copies[0], members[0], now.AddDays(-3),
+            members[0].MembershipType.LoanPeriodDays);
+
+        // Out and overdue. Issued 30 days ago on a 14-day period, so it is 16 days
+        // late and returning it assesses a fine of 16 x the configured rate.
+        Loan overdue = Loan.Issue(copies[1], members[1], now.AddDays(-30), 14);
+
+        // Badly overdue, to give the chase list something with a range in it.
+        Loan veryOverdue = Loan.Issue(copies[2], members[2], now.AddDays(-75), 14);
+
+        // Closed on time - history, and proof that the partial index permits a
+        // copy to be lent again once it is back.
+        Loan returnedOnTime = Loan.Issue(copies[3], members[0], now.AddDays(-60), 14);
+        returnedOnTime.Return(now.AddDays(-50));
+
+        // Closed late. No Fine row is created here: fines are assessed by the
+        // post-commit handler, and inventing one directly would model an outcome
+        // the running system never produces that way.
+        Loan returnedLate = Loan.Issue(copies[4], members[1], now.AddDays(-90), 14);
+        returnedLate.Return(now.AddDays(-70));
+
+        _context.Loans.AddRange(active, overdue, veryOverdue, returnedOnTime, returnedLate);
+
+        // Clears the events the two returns collected. Nothing should dispatch
+        // from seeding: these are historical facts being recorded, not things
+        // happening now, and a seeded return must not notify anyone or assess a
+        // fine six weeks after the fact.
+        returnedOnTime.ClearDomainEvents();
+        returnedLate.ClearDomainEvents();
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        LogLoansSeeded(5);
+    }
+
     private static Member NewMember(
         string fullName, string email, int membershipTypeId, DateOnly joinedOn, string? phone)
     {
@@ -477,6 +567,12 @@ public sealed partial class DatabaseSeeder
         Level = LogLevel.Information,
         Message = "Seeded {MemberCount} members across {TypeCount} membership types.")]
     private partial void LogMembersSeeded(int memberCount, int typeCount);
+
+    [LoggerMessage(
+        EventId = 7005,
+        Level = LogLevel.Information,
+        Message = "Seeded {LoanCount} loans")]
+    private partial void LogLoansSeeded(int loanCount);
 
     [LoggerMessage(
         EventId = 1000,

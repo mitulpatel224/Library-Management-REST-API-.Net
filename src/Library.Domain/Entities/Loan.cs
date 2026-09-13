@@ -42,13 +42,18 @@ public sealed class Loan : AuditableEntity
     private Loan() { }
 
     private Loan(
-        int bookCopyId,
-        int memberId,
+        BookCopy bookCopy,
+        Member member,
         DateTimeOffset issuedAt,
         DateTimeOffset dueAt)
     {
-        BookCopyId = bookCopyId;
-        MemberId = memberId;
+        // Both the id AND the navigation are set. Setting only the id leaves
+        // BookCopy null on a freshly-issued loan, and Return() would then quietly
+        // skip shelving the copy - see the guard in Return for why that matters.
+        BookCopy = bookCopy;
+        BookCopyId = bookCopy.Id;
+        Member = member;
+        MemberId = member.Id;
         IssuedAt = issuedAt;
         DueAt = dueAt;
     }
@@ -163,7 +168,7 @@ public sealed class Loan : AuditableEntity
         // for a copy that cannot leave the building.
         copy.MarkOnLoan();
 
-        return new Loan(copy.Id, member.Id, issuedAt, issuedAt.AddDays(loanPeriodDays));
+        return new Loan(copy, member, issuedAt, issuedAt.AddDays(loanPeriodDays));
     }
 
     /// <summary>
@@ -195,8 +200,21 @@ public sealed class Loan : AuditableEntity
                 "A copy cannot be returned before it was issued.");
         }
 
+        // Throws rather than skipping when the copy is not loaded. This was
+        // written as BookCopy?.MarkReturned(condition), and the null-conditional
+        // was actively harmful: with the navigation unloaded the loan closed while
+        // the copy stayed OnLoan, so the filtered unique index would then permit
+        // no new loan for it and nothing would ever point at the problem. A copy
+        // silently stranded off the shelf is worse than a loud failure here.
+        if (BookCopy is null)
+        {
+            throw new InvalidOperationException(
+                $"Loan {Id} was loaded without its BookCopy, so the copy cannot be "
+                + "shelved. Load the loan with its copy before returning it.");
+        }
+
         ReturnedAt = returnedAt;
-        BookCopy?.MarkReturned(condition);
+        BookCopy.MarkReturned(condition);
 
         RaiseDomainEvent(new LoanReturnedEvent(
             Id,

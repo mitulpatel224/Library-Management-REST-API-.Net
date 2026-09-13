@@ -161,8 +161,8 @@ Phase 4 adds the rule the problem statement is built around, and it is enforced
 in the **database**, not only in C#:
 
 ```sql
-CREATE UNIQUE INDEX IX_Loan_ActiveCopy
-  ON Loan(BookCopyId) WHERE ReturnedAt IS NULL;
+CREATE UNIQUE INDEX "UX_Loans_BookCopyId_Active"
+  ON "Loans" ("BookCopyId") WHERE "ReturnedAt" IS NULL;
 ```
 
 A partial index in SQLite, a filtered index in SQL Server. The service checks for
@@ -174,7 +174,7 @@ concurrent issue requests can both pass that check. Only one can win the index.
 
 ## API surface
 
-Implemented today (Phases 2 and 3):
+Implemented today (Phases 2, 3 and 4):
 
 | Method | Route | Description |
 |---|---|---|
@@ -200,6 +200,17 @@ Implemented today (Phases 2 and 3):
 | `GET` | `/api/membership-types` | Types with their limits and member counts |
 | `GET` | `/api/membership-types/{id}` | One membership type |
 | `POST` | `/api/membership-types` | Create a membership type |
+| `POST` | `/api/loans/issue` | Issue a copy to a member |
+| `GET` | `/api/loans` | Search loans; `overdueOnly=true` is the chase list |
+| `GET` | `/api/loans/{id}` | One loan, with its fine if assessed |
+| `POST` | `/api/loans/{id}/return` | Take a copy back; assesses a fine when late |
+| `POST` | `/api/loans/{id}/renew` | Extend a loan; refused once overdue |
+| `GET` | `/api/members/{id}/loans` | This member's lending history |
+| `GET` | `/api/members/{id}/balance` | What they owe, and whether they may borrow |
+| `GET` | `/api/fines` | Search fines; `outstanding=true` for unsettled |
+| `GET` | `/api/fines/{id}` | One fine |
+| `POST` | `/api/fines/{id}/pay` | Settle in full |
+| `POST` | `/api/fines/{id}/waive` | Cancel a fine, with a required reason |
 | `GET` | `/health/live` | Liveness — does not touch the database |
 | `GET` | `/health/ready` | Readiness — includes the database |
 
@@ -389,7 +400,7 @@ an executable:
 | 1 | Boilerplate, git, tooling | ✅ Done |
 | 2 | Book APIs | 🔨 Read side done; writes in progress |
 | 3 | Reader / Member APIs | ✅ Endpoints done; member tests outstanding |
-| 4 | Lending APIs — loans, overdue, fines | ⬜ |
+| 4 | Lending APIs — loans, overdue, fines | ✅ Done |
 | 5 | Authentication & authorization | ⬜ |
 | 6 | Import books from CSV/JSON | ⬜ |
 | 7 | Reports & CSV export | ⬜ |

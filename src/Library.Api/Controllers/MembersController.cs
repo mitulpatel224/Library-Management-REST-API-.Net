@@ -1,4 +1,7 @@
 using Library.Application.Common.Models;
+using Library.Application.Loans;
+using Library.Application.Loans.Dtos;
+using Library.Application.Loans.Requests;
 using Library.Application.Members;
 using Library.Application.Members.Dtos;
 using Library.Application.Members.Requests;
@@ -13,8 +16,18 @@ namespace Library.Api.Controllers;
 public sealed class MembersController : ControllerBase
 {
     private readonly IMemberService _memberService;
+    private readonly ILoanService _loanService;
+    private readonly IFineService _fineService;
 
-    public MembersController(IMemberService memberService) => _memberService = memberService;
+    public MembersController(
+        IMemberService memberService,
+        ILoanService loanService,
+        IFineService fineService)
+    {
+        _memberService = memberService;
+        _loanService = loanService;
+        _fineService = fineService;
+    }
 
     /// <summary>Searches members with filtering, sorting and paging.</summary>
     /// <remarks>
@@ -95,6 +108,46 @@ public sealed class MembersController : ControllerBase
         MemberDetailDto created = await _memberService.RegisterAsync(request, cancellationToken);
 
         return CreatedAtRoute("GetMemberById", new { id = created.Id }, created);
+    }
+
+    /// <summary>Lists this member's loans, past and present.</summary>
+    /// <remarks>
+    /// Deferred from Phase 3, which had no <c>Loan</c> entity for it to return.
+    /// Accepts the same filters as <c>GET /api/loans</c>; <c>status=Active</c>
+    /// answers "what has this member got out right now?".
+    /// </remarks>
+    /// <response code="200">A page of loans. An empty page is valid.</response>
+    /// <response code="404">
+    /// No member with this id exists — distinct from a member with no loans, which
+    /// is an empty 200.
+    /// </response>
+    [HttpGet("{id:int}/loans", Name = "GetMemberLoans")]
+    [ProducesResponseType<PagedResult<LoanSummaryDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PagedResult<LoanSummaryDto>>> GetLoans(
+        int id,
+        [FromQuery] LoanSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _loanService.GetForMemberAsync(id, request, cancellationToken));
+    }
+
+    /// <summary>What this member owes, and whether they may borrow more.</summary>
+    /// <remarks>
+    /// One round trip for the whole lending position — outstanding fines, active
+    /// and overdue loan counts, and the limit from their membership type. Every
+    /// figure is aggregated in SQL rather than by loading their history.
+    /// </remarks>
+    /// <response code="200">The member's balance.</response>
+    /// <response code="404">No member with this id exists.</response>
+    [HttpGet("{id:int}/balance", Name = "GetMemberBalance")]
+    [ProducesResponseType<MemberBalanceDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MemberBalanceDto>> GetBalance(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _fineService.GetMemberBalanceAsync(id, cancellationToken));
     }
 
     /// <summary>Updates a member's details.</summary>

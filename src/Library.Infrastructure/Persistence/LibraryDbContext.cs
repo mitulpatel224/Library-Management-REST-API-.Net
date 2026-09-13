@@ -3,6 +3,8 @@ using Library.Application.Common.Abstractions;
 using Library.Domain.Common;
 using Library.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Library.Infrastructure.Persistence;
 
@@ -84,7 +86,69 @@ public class LibraryDbContext : DbContext
         // Discovers every IEntityTypeConfiguration<T> in Library.Infrastructure.
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
+        ApplySqliteDateTimeOffsetConversion(modelBuilder);
         ApplyActiveLoanIndexFilter(modelBuilder);
+    }
+
+    /// <summary>
+    /// Stores every <see cref="DateTimeOffset"/> as a UTC <see cref="DateTime"/>
+    /// when running on SQLite.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Without this, <c>ORDER BY</c> on any timestamp throws.</b> SQLite has no
+    /// date type: the provider stores a <c>DateTimeOffset</c> as TEXT with its
+    /// offset appended — <c>2026-09-13 16:54:21.647+00:00</c> — and text sorts
+    /// lexicographically. Two instants an hour apart in different offsets would
+    /// sort in the wrong order, so EF Core refuses to translate the ordering at
+    /// all rather than return a wrong answer quietly. <c>GET /api/loans</c> sorts
+    /// by due date, so it met that refusal as a 500.
+    /// </para>
+    /// <para>
+    /// Converting to UTC loses nothing here: every timestamp in this system comes
+    /// from <c>IClock.UtcNow</c>, so the offset is always zero and carries no
+    /// information. What it gains is a stored form —
+    /// <c>2026-09-13 16:54:21.647</c> — whose lexicographic order <i>is</i>
+    /// chronological order.
+    /// </para>
+    /// <para>
+    /// SQL Server is left alone: <c>datetimeoffset</c> is a real type there, sorts
+    /// correctly, and keeps the offset. This is the shape of provider difference
+    /// the architecture rule is about — it lives in Infrastructure, and nothing
+    /// above this layer can tell the two apart.
+    /// </para>
+    /// </remarks>
+    private void ApplySqliteDateTimeOffsetConversion(ModelBuilder modelBuilder)
+    {
+        if (Database.ProviderName?.Contains("Sqlite", StringComparison.Ordinal) != true)
+        {
+            return;
+        }
+
+        var converter = new ValueConverter<DateTimeOffset, DateTime>(
+            value => value.UtcDateTime,
+            value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)));
+
+        var nullableConverter = new ValueConverter<DateTimeOffset?, DateTime?>(
+            value => value.HasValue ? value.Value.UtcDateTime : null,
+            value => value.HasValue
+                ? new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc))
+                : null);
+
+        foreach (IMutableEntityType entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (IMutableProperty property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTimeOffset))
+                {
+                    property.SetValueConverter(converter);
+                }
+                else if (property.ClrType == typeof(DateTimeOffset?))
+                {
+                    property.SetValueConverter(nullableConverter);
+                }
+            }
+        }
     }
 
     /// <summary>

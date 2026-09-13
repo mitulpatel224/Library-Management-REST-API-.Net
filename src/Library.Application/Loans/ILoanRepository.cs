@@ -1,4 +1,6 @@
+using Library.Application.Common.Models;
 using Library.Application.Loans.Dtos;
+using Library.Application.Loans.Requests;
 using Library.Domain.Entities;
 
 namespace Library.Application.Loans;
@@ -17,6 +19,16 @@ public interface ILoanRepository
     // ---------------------------------------------------------------- reads
 
     Task<LoanDetailDto?> GetByIdAsync(int id, CancellationToken cancellationToken = default);
+
+    Task<PagedResult<LoanSummaryDto>> SearchAsync(
+        LoanSearchRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Every loan this member has held, newest first.</summary>
+    Task<PagedResult<LoanSummaryDto>> GetForMemberAsync(
+        int memberId,
+        LoanSearchRequest request,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The open loan for this copy, if any.

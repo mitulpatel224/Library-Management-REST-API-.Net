@@ -405,3 +405,15 @@ generated_code = true
 dotnet_analyzer_diagnostic.severity = none
 dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.CA1062.severity = none
+
+# ---------------------------------------------------------------------------
+# CA1711 reserves the "EventHandler" suffix for delegates, to stop a plain class
+# being mistaken for one. IDomainEventHandler<TEvent> is neither a delegate nor
+# ambiguous: it is a generic interface constrained to IDomainEvent, and it is the
+# name the DDD literature uses. Renaming it to satisfy the analyzer would cost
+# every reader a translation for no gain.
+#
+# Scoped to this one file, so the rule stays active everywhere else.
+# ---------------------------------------------------------------------------
+[**/Common/Abstractions/IDomainEventDispatcher.cs]
+dotnet_diagnostic.CA1711.severity = none

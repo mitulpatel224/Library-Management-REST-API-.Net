@@ -225,7 +225,7 @@ holds under load and one that holds only in a demo.
 
 ## Index strategy
 
-Nineteen indexes, each with a job.
+Twenty-four indexes, each with a job.
 
 | Index | Table | Purpose |
 |---|---|---|
@@ -246,6 +246,11 @@ Nineteen indexes, each with a job.
 | `IX_Members_Email` **UNIQUE** | Members | One mailbox is one membership. Works because `Email` lower-cases on construction |
 | `IX_Members_FullName` | Members | The default member sort. **Not** unique — two members genuinely share a name |
 | `IX_Members_Status_MembershipTypeId` | Members | Composite, for the status and type filters |
+| `UX_Loans_BookCopyId_Active` **UNIQUE, FILTERED** | Loans | `WHERE ReturnedAt IS NULL`. The lending invariant — see below |
+| `IX_Loans_MemberId_ReturnedAt` | Loans | "what has this member got out?" |
+| `IX_Loans_ReturnedAt_DueAt` | Loans | The overdue report: open loans, most late first |
+| `UX_Fines_LoanId` **UNIQUE** | Fines | One fine per loan. Catches a replayed domain event |
+| `IX_Fines_MemberId_Settlement` | Fines | "what does this member owe?" |
 
 **On composite column order.** `IX_BookCopies_BookId_Status` is `(BookId, Status)`
 and not the reverse, because a composite index can only be used left-to-right.
@@ -257,6 +262,33 @@ possible values. Reversed, the index would be nearly useless for
 merge two different authors who happen to share a name, silently combining their
 bibliographies. The index exists for search speed, not for identity.
 `IX_Members_FullName` is non-unique for the same reason.
+
+**On the filtered index — the one constraint that is load-bearing.**
+`UX_Loans_BookCopyId_Active` is unique over only the rows where
+`ReturnedAt IS NULL`. `Loan(BookCopyId)` cannot be unique outright, because a copy
+is lent hundreds of times over its life; it is unique only among the loans that
+are *currently open*.
+
+This is the only place in the schema where a business rule is enforced by the
+database rather than merely reflected in it. The application checks the same rule
+twice for the sake of a readable error, but both checks READ before they WRITE, so
+two concurrent requests can pass them both. The index serialises the writes and is
+the actual guarantee.
+
+Both providers support the feature — SQL Server calls it a "filtered index",
+SQLite a "partial index" — but `HasFilter` takes RAW SQL that EF Core emits
+verbatim, identifier quoting included. The filter text is therefore
+provider-specific (`"ReturnedAt" IS NULL` vs `[ReturnedAt] IS NULL`) and is
+applied in `LibraryDbContext.OnModelCreating` from the configured provider. An
+unrecognised provider throws at startup rather than silently emitting an index
+with no filter, which would reject the second loan of every copy.
+
+**On `DateTimeOffset` under SQLite.** SQLite has no date type, and the provider
+stores a `DateTimeOffset` as TEXT with its offset appended — so text ordering is
+not chronological ordering and EF Core refuses to translate `ORDER BY` on such a
+column at all. A SQLite-only value converter stores these as UTC `DateTime`
+instead, whose lexicographic order is chronological. Nothing is lost: every
+timestamp here comes from `IClock.UtcNow`, so the offset is always zero.
 
 **On uniqueness and collation — a real, provider-dependent trap.** A unique index
 is only as case-insensitive as its collation. SQL Server's default collation folds
@@ -291,6 +323,10 @@ Chosen per relationship. A blanket policy would be wrong in at least one place.
 | `BookGenre → Book/Genre` | `CASCADE` | Same |
 | `Category → Category` | `RESTRICT` | Deleting *Fiction* must not take *Science Fiction* with it |
 | `Member → MembershipType` | `RESTRICT` | Deleting a membership type must not delete the members holding it. Re-assign them first |
+| `Loan → BookCopy` | `RESTRICT` | Loan history is the record of who had what, and it outlives the copy |
+| `Loan → Member` | `RESTRICT` | Same. This is why cancelling a membership retains the row rather than deleting it |
+| `Fine → Loan` | `CASCADE` | A fine has no meaning without the loan that caused it |
+| `Fine → Member` | `RESTRICT` | A member with an unpaid fine cannot be deleted out from under it |
 
 `CASCADE` everywhere is the dangerous default: one careless delete of a popular
 category would remove hundreds of books with no warning and no undo.

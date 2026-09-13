@@ -2,12 +2,15 @@ using Library.Application.Books;
 using Library.Application.Common.Abstractions;
 using Library.Application.Loans;
 using Library.Application.Members;
+using Library.Application.Notifications;
+using Library.Infrastructure.Notifications;
 using Library.Infrastructure.Persistence;
 using Library.Infrastructure.Repositories;
 using Library.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Library.Infrastructure;
 
@@ -28,6 +31,28 @@ public static class DependencyInjection
         // Singleton: stateless, thread-safe, and needed by the DbContext factory
         // below - a scoped clock could not be resolved from the root provider.
         services.AddSingleton<IClock, SystemClock>();
+
+        // FineOptions lives in Library.Application - the fine handler depends on
+        // it - but binding it is an infrastructure concern, and Application has no
+        // configuration reference to do it with. Declared there, wired here.
+        services.AddOptions<FineOptions>()
+            .Bind(configuration.GetSection(FineOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Exposed as a delegate rather than IOptions<FineOptions> so a consumer
+        // cannot reach fields it has no business reading, and can be tested with
+        // () => 50m instead of options plumbing.
+        //
+        // IOptionsMonitor, not IOptions: the rate is read at the moment a fine is
+        // assessed, so an appsettings edit takes effect without a restart.
+        services.AddSingleton<FineRateResolver>(provider =>
+        {
+            IOptionsMonitor<FineOptions> options =
+                provider.GetRequiredService<IOptionsMonitor<FineOptions>>();
+
+            return () => options.CurrentValue.RatePerDay;
+        });
 
         DatabaseOptions dbOptions = configuration
             .GetSection(DatabaseOptions.SectionName)
@@ -52,6 +77,14 @@ public static class DependencyInjection
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<IMemberRepository, MemberRepository>();
         services.AddScoped<ILoanRepository, LoanRepository>();
+        services.AddScoped<IFineRepository, FineRepository>();
+
+        // Scoped: it reads the ChangeTracker of the request's DbContext.
+        services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+
+        // Singleton so subscribers attached at startup stay attached. A scoped
+        // notifier would drop every subscription at the end of each request.
+        services.AddSingleton<INotificationService, NotificationService>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

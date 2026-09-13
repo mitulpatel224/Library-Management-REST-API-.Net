@@ -15,6 +15,13 @@
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Mapster" />
     <PackageReference Include="Mapster.DependencyInjection" />
+
+    <!-- Needed by AddApplication to bind and validate FineOptions. These are
+         abstractions only - no configuration PROVIDER is referenced here, so the
+         layer still knows nothing about where settings come from. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
   </ItemGroup>
 
   <ItemGroup>

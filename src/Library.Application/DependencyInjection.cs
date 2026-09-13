@@ -29,6 +29,11 @@ public static class DependencyInjection
     {
         Assembly assembly = typeof(DependencyInjection).Assembly;
 
+        // FineOptions is DECLARED here (the handler depends on FineRateResolver)
+        // but BOUND in AddInfrastructure. Reading configuration is an
+        // infrastructure concern, and this layer deliberately has no
+        // Microsoft.Extensions.Configuration reference to do it with.
+
         // Scans for every IValidator<T> in this assembly.
         // Registered as Scoped so a validator may depend on scoped services
         // (e.g. a repository, to check uniqueness against the database).
@@ -41,6 +46,15 @@ public static class DependencyInjection
         services.AddScoped<Books.IBookService, Books.BookService>();
         services.AddScoped<Members.IMemberService, Members.MemberService>();
         services.AddScoped<Loans.ILoanService, Loans.LoanService>();
+        services.AddScoped<Loans.IFineService, Loans.FineService>();
+
+        // Handlers are resolved by the dispatcher from the closed interface type,
+        // so each must be registered against IDomainEventHandler<TEvent> and not
+        // only against its own class - GetServices(typeof(IDomainEventHandler<..>))
+        // finds nothing otherwise, and the fine would silently never be assessed.
+        services.AddScoped<
+            Common.Abstractions.IDomainEventHandler<Domain.Events.LoanReturnedEvent>,
+            Loans.Handlers.FineAssessmentHandler>();
 
         return services;
     }

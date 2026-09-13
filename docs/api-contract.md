@@ -132,6 +132,21 @@ Validation failures add a per-field `errors` object:
 | `member.invalid_email` | 422 | |
 | `membership_type.not_found` | 404 | |
 | `membership_type.duplicate_name` | 409 | Case-insensitive; the message quotes the STORED spelling |
+| `loan.not_found` | 404 | |
+| `loan.copy_already_on_loan` | 409 | The copy is out. Same answer whether detected or lost to a race |
+| `loan.already_returned` | 409 | |
+| `loan.overdue_cannot_renew` | 409 | Renewing would erase an accrued fine |
+| `loan.invalid_period` | 422 | Loan or renewal period must be at least one day |
+| `loan.return_before_issue` | 422 | |
+| `member.cannot_borrow` | 422 | Suspended, expired or cancelled |
+| `member.loan_limit_reached` | 422 | At `MembershipType.MaxConcurrentLoans` |
+| `copy.not_available` | 409 | Not issuable in its current status |
+| `fine.not_found` | 404 | |
+| `fine.already_paid` | 409 | |
+| `fine.already_waived` | 409 | |
+| `fine.not_overdue` | 422 | No fine is assessed for an on-time return |
+| `fine.invalid_rate` | 422 | |
+| `fine.waiver_reason_required` | 422 | |
 | `validation.failed` | 422 | See the `errors` object |
 | `auth.forbidden` | 403 | Phase 5 |
 | `request.cancelled` | 499 | The client disconnected |
@@ -573,6 +588,208 @@ that name:
   "traceId": "00-3560002ad0a5d5bbca03b02449d27b0f-fb730f63b849896e-00"
 }
 ```
+
+---
+
+### `POST /api/loans/issue`
+
+**201** · **404** copy or member · **409** `loan.copy_already_on_loan` /
+`copy.not_available` · **422** `member.cannot_borrow`,
+`member.loan_limit_reached`, validation
+
+```json
+{ "bookCopyId": 40, "memberId": 2 }
+```
+
+Note what is **absent**: `issuedAt` and `dueAt`. Both are the server's to decide —
+the issue time comes from the clock, the due date from the member's
+`MembershipType.LoanPeriodDays`. Accepting either would let a caller grant
+themselves a longer loan than their membership allows, or back-date an issue to
+avoid a fine.
+
+**A 409 means the copy is out**, and gives the same answer whether it was already
+out when the request arrived or was issued to someone else a moment earlier. The
+filtered unique index `Loan(BookCopyId) WHERE ReturnedAt IS NULL` is what decides;
+from the caller's side both mean *someone else has it*.
+
+```json
+{
+  "type": "https://httpstatuses.io/409",
+  "title": "Request conflicts with the current state of the resource",
+  "status": 409,
+  "detail": "Copy 'LIB-001039' is already on loan to MEM-2025-00002 until 2026-08-28.",
+  "errorCode": "loan.copy_already_on_loan"
+}
+```
+
+---
+
+### `GET /api/loans`
+
+**200** · **422** on an inverted date range
+
+```
+GET /api/loans
+    ?search=          barcode, book title, member name, membership number
+    &memberId=        &bookCopyId=   &bookId=
+    &status=          Active | Overdue | Returned
+    &overdueOnly=     true -> the chase list
+    &issuedFrom=      &issuedTo=     &dueFrom=      &dueTo=
+    &sortBy=          due | issued | returned | member | title | barcode
+    &sortDir=         asc | desc
+    &page=1           &pageSize=20   (max 100)
+```
+
+`status` is **computed against the server clock**, not stored — a loan becomes
+overdue at midnight with nothing writing to its row, so a column would be stale.
+The default sort is `due` ascending, which puts the most overdue loan first.
+
+---
+
+### `GET /api/loans/{id}`
+
+**200** · **404** `loan.not_found`. Includes the fine, if one was assessed.
+
+---
+
+### `POST /api/loans/{id}/return`
+
+**200** · **404** · **409** `loan.already_returned` · **422**
+`loan.return_before_issue`
+
+```json
+{ "condition": "Poor" }
+```
+
+`condition` is optional, recorded on inspection at the desk. A copy returned in
+`Poor` condition goes to `Damaged` rather than back onto the shelf.
+
+The return time is the server's. Whoever sets it decides the fine, and a caller
+who can set it can set it to the due date.
+
+**If the copy is late, the fine is assessed by a handler that runs after this
+request's transaction commits.** That ordering is deliberate — a rolled-back
+return must never leave a fine behind — and it means the fine is written in a
+separate transaction. Response for a copy 16 days late at ₹50/day:
+
+```json
+{
+  "id": 2,
+  "status": "Returned",
+  "daysOverdue": 16,
+  "fine": {
+    "id": 1,
+    "loanId": 2,
+    "membershipNumber": "MEM-2025-00002",
+    "daysOverdue": 16,
+    "ratePerDay": 50,
+    "amount": 800,
+    "outstandingAmount": 800,
+    "isSettled": false
+  }
+}
+```
+
+---
+
+### `POST /api/loans/{id}/renew`
+
+**200** · **404** · **409** `loan.already_returned` / `loan.overdue_cannot_renew`
+· **422** out-of-range period
+
+```json
+{ "additionalDays": 14 }
+```
+
+Optional — defaults to the member's own loan period, which is what "renew" means
+at a desk: a Student gets another 28 days where a Standard member gets 14. Capped
+at 365, because unbounded renewal is indistinguishable from never returning the
+book.
+
+**Refused once overdue.** Renewing a late loan would erase a fine that has already
+accrued, turning "return it late and renew" into a way of never paying.
+
+---
+
+### `GET /api/members/{id}/loans`
+
+**200** · **404** `member.not_found`
+
+Deferred from Phase 3, which had no `Loan` entity for it to return. Takes the same
+filters as `GET /api/loans`. A member with no loans is an empty **200**; an
+unknown member is a **404** — different answers a caller must be able to tell
+apart.
+
+---
+
+### `GET /api/members/{id}/balance`
+
+**200** · **404** `member.not_found`
+
+```json
+{
+  "memberId": 2,
+  "membershipNumber": "MEM-2025-00002",
+  "totalOutstanding": 800,
+  "unsettledFineCount": 1,
+  "activeLoanCount": 1,
+  "overdueLoanCount": 0,
+  "maxConcurrentLoans": 8,
+  "canBorrowMore": true
+}
+```
+
+Every figure is aggregated in SQL. Note that `totalOutstanding` does **not**
+currently block borrowing — the debt is reported, and whether it should stop a
+loan is an open policy decision.
+
+---
+
+### `GET /api/fines`
+
+**200** · **422** on an inverted date range
+
+```
+GET /api/fines
+    ?memberId=
+    &outstanding=   true -> neither paid nor waived; false -> settled only
+    &assessedFrom=  &assessedTo=
+    &page=1         &pageSize=20
+```
+
+---
+
+### `GET /api/fines/{id}`
+
+**200** · **404** `fine.not_found`
+
+---
+
+### `POST /api/fines/{id}/pay`
+
+**200** · **404** · **409** `fine.already_paid` / `fine.already_waived`
+
+Payment is **all-or-nothing**. Part payment would need an amount-paid column, a
+rule for overpayment, and a decision about whether a partly-paid fine still blocks
+borrowing — none of which is in scope, and all of which would be half-answered by
+accepting an amount here.
+
+`amount` does not move once settled — it is a record of what was charged. Only
+`outstandingAmount` drops to zero.
+
+---
+
+### `POST /api/fines/{id}/waive`
+
+**200** · **404** · **409** `fine.already_paid` / `fine.already_waived` · **422**
+no reason
+
+```json
+{ "reason": "Hospitalised; produced documentation" }
+```
+
+The reason is required by the entity as well as the validator. Waiving money owed
+is precisely the operation that has to be reviewable afterwards.
 
 ---
 
