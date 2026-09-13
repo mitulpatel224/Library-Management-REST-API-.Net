@@ -36,7 +36,7 @@ done.
 - [x] `.claude/skills/` — 8 skills (4 foundational, plus `csharp-standards-1rivet`,
       `xunit-testing`, `request-validation`, `domain-modelling`)
 - [x] `.claude/commands/` — 4 slash commands
-- [ ] `.github/workflows/ci.yml` — now unblocked: `dotnet test` works
+- [x] `.github/workflows/ci.yml` — build + test + vulnerability scan
 - [ ] Graphify + Archify installed, first diagrams generated
 - [x] `docs/phases/phase-01.md`
 
@@ -85,9 +85,9 @@ Gaps found when mapping the standard onto the codebase on 2026-09-13. Each was
 verified against the current code, not assumed. Full rule-by-rule mapping lives
 in the `csharp-standards-1rivet` skill.
 
-- [ ] `DateTime.UtcNow` in `BookRequestValidators.cs:69,116,148` — breaks project
-      rule 6 and makes the three "date not in the future" rules untestable.
-      Inject `IClock` into the validators (the filter resolves them from DI)
+- [x] `DateTime.UtcNow` in `BookRequestValidators.cs` — `IClock` injected into
+      the three validators; 25 tests added, including one that proves the rule
+      follows the clock rather than the machine date
 - [ ] Empty `catch (UnauthorizedAccessException) { }` in `LibraryApiFactory.cs` —
       §7.4 forbids an empty catch; the `IOException` arm beside it is commented
 - [ ] Brace-less `if` guards in `Entity.cs:41,42,46,50` — §6.1 requires braces
@@ -97,8 +97,7 @@ in the `csharp-standards-1rivet` skill.
 - [ ] Max-length literals (`500`, `50`, `4000`) duplicated between the validators
       and the EF configurations, with nothing enforcing agreement. Hoist to shared
       constants
-- [ ] `"^[A-Za-z0-9\\-_]+$"` in `BookRequestValidators.cs` should be a verbatim
-      `@"..."` literal — §7.2
+- [x] Barcode regex is now a verbatim `@"..."` literal — §7.2
 - [ ] No `<Version>` in `Directory.Build.props`, so every assembly ships as
       `1.0.0.0`
 - [ ] Decide whether `file_header_template` + `IDE0073` (copyright headers) are
@@ -237,3 +236,5 @@ in the `csharp-standards-1rivet` skill.
 | 2026-09-13 | Error messages inline, not in resources (§7.2) | `InvariantGlobalization` is on and the app is single-locale; the stable contract is `ErrorCode`, not the prose. Resources would add indirection with no reader today | `.resx` resource files for all message strings |
 | 2026-09-13 | No per-file copyright header (§6.2) | Internal assessment repository with one licence at the root; `file_header_template = unset`. For client work, set the template and enable `IDE0073` so the header is generated and verified rather than copy-pasted | Hand-written copyright block in every file |
 | 2026-09-13 | `global.json` selects Microsoft.Testing.Platform | The .NET 10 SDK retired the VSTest bridge that xUnit v3 does not use. `global.json` is the mechanism that works; a `dotnet.config` `[dotnet.test.runner]` section and `TestingPlatformDotnetTestSupport=true` both look equivalent and do nothing. `dotnet test` now runs 31 tests, unblocking CI. `dotnet.config` removed as dead config. | Continuing to run the test executables directly |
+| 2026-09-13 | `IClock` injected into FluentValidation validators | The three "date cannot be in the future" rules compared against `DateTime.UtcNow`, so the only way to test them was to change the machine's date — meaning they were never tested. Validators are resolved from DI by `ValidationFilter`, so constructor injection works exactly as in a service. | Leaving the direct clock read and testing the rules manually |
+| 2026-09-13 | CI fails the build on a vulnerable package, warns on a deprecated one | A CVE arriving through a transitive dependency is the likely case and should stop a merge. Deprecation often has no available replacement, so failing on it would force either a rushed migration or a permanently red pipeline. `dotnet list package --vulnerable` exits 0 even on a finding, so the step greps the output rather than trusting the exit code. | Failing on both, or trusting the exit code |

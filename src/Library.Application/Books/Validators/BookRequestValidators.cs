@@ -1,5 +1,6 @@
 using FluentValidation;
 using Library.Application.Books.Requests;
+using Library.Application.Common.Abstractions;
 using Library.Domain.ValueObjects;
 
 namespace Library.Application.Books.Validators;
@@ -31,8 +32,17 @@ namespace Library.Application.Books.Validators;
 /// </remarks>
 public sealed class CreateBookRequestValidator : AbstractValidator<CreateBookRequest>
 {
-    public CreateBookRequestValidator()
+    /// <param name="clock">
+    /// Injected rather than read from <c>DateTime.UtcNow</c>. The "not in the
+    /// future" rule below is a comparison against now, so with the clock baked
+    /// in there is no way to test it except by changing the machine's date.
+    /// The <c>ValidationFilter</c> resolves validators from DI, so constructor
+    /// injection works here exactly as it does in a service.
+    /// </param>
+    public CreateBookRequestValidator(IClock clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
+
         RuleFor(r => r.Isbn)
             .NotEmpty().WithMessage("ISBN is required.")
             .Must(BeAValidIsbn)
@@ -66,7 +76,7 @@ public sealed class CreateBookRequestValidator : AbstractValidator<CreateBookReq
         // than warned about, because a wrong date silently corrupts every
         // date-range report built on it.
         RuleFor(r => r.PublishedOn)
-            .LessThanOrEqualTo(_ => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            .LessThanOrEqualTo(_ => clock.Today.AddDays(1))
             .When(r => r.PublishedOn.HasValue)
             .WithMessage("Publication date cannot be in the future.");
 
@@ -86,8 +96,10 @@ public sealed class CreateBookRequestValidator : AbstractValidator<CreateBookReq
 
 public sealed class UpdateBookRequestValidator : AbstractValidator<UpdateBookRequest>
 {
-    public UpdateBookRequestValidator()
+    public UpdateBookRequestValidator(IClock clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
+
         RuleFor(r => r.Title)
             .NotEmpty().WithMessage("Title is required.")
             .MaximumLength(500).WithMessage("Title must be 500 characters or fewer.");
@@ -113,7 +125,7 @@ public sealed class UpdateBookRequestValidator : AbstractValidator<UpdateBookReq
             .MaximumLength(4000).WithMessage("Description must be 4000 characters or fewer.");
 
         RuleFor(r => r.PublishedOn)
-            .LessThanOrEqualTo(_ => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            .LessThanOrEqualTo(_ => clock.Today.AddDays(1))
             .When(r => r.PublishedOn.HasValue)
             .WithMessage("Publication date cannot be in the future.");
 
@@ -131,12 +143,14 @@ public sealed class UpdateBookRequestValidator : AbstractValidator<UpdateBookReq
 
 public sealed class AddBookCopyRequestValidator : AbstractValidator<AddBookCopyRequest>
 {
-    public AddBookCopyRequestValidator()
+    public AddBookCopyRequestValidator(IClock clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
+
         RuleFor(r => r.Barcode)
             .NotEmpty().WithMessage("Barcode is required.")
             .MaximumLength(50).WithMessage("Barcode must be 50 characters or fewer.")
-            .Matches("^[A-Za-z0-9\\-_]+$")
+            .Matches(@"^[A-Za-z0-9\-_]+$")
             .WithMessage("Barcode may contain only letters, digits, hyphens and underscores.");
 
         RuleFor(r => r.Condition).IsInEnum().WithMessage("Unknown condition value.");
@@ -145,7 +159,7 @@ public sealed class AddBookCopyRequestValidator : AbstractValidator<AddBookCopyR
             .MaximumLength(50).WithMessage("Shelf location must be 50 characters or fewer.");
 
         RuleFor(r => r.AcquiredOn)
-            .LessThanOrEqualTo(_ => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1)))
+            .LessThanOrEqualTo(_ => clock.Today.AddDays(1))
             .When(r => r.AcquiredOn.HasValue)
             .WithMessage("Acquisition date cannot be in the future.");
     }
@@ -162,7 +176,7 @@ public sealed class UpdateBookCopyRequestValidator : AbstractValidator<UpdateBoo
         RuleFor(r => r.Barcode)
             .NotEmpty().WithMessage("Barcode is required.")
             .MaximumLength(50).WithMessage("Barcode must be 50 characters or fewer.")
-            .Matches("^[A-Za-z0-9\\-_]+$")
+            .Matches(@"^[A-Za-z0-9\-_]+$")
             .WithMessage("Barcode may contain only letters, digits, hyphens and underscores.");
 
         RuleFor(r => r.Condition).IsInEnum().WithMessage("Unknown condition value.");

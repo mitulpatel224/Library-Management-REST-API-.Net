@@ -1,0 +1,102 @@
+name: CI
+
+# Runs on every push to main and on every pull request. The point is that a
+# reviewer never has to take "it builds on my machine" on trust.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel an in-flight run when the same branch is pushed again - the older
+# result is already stale, and queueing both wastes minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No version pinned here: global.json fixes the SDK, so the workflow and a
+      # developer machine cannot silently disagree about which one is in use.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Restore is cached on the lock formed by the central package files. With
+      # CPM every version lives in Directory.Packages.props, so that one file
+      # plus the project files is a complete cache key.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore LibraryManagement.slnx
+
+      # --no-restore so a restore failure is reported by the step above, where
+      # it belongs, rather than buried in build output.
+      #
+      # The solution builds with TreatWarningsAsErrors, so this step fails on a
+      # warning. That is the intent: a warning nobody has to fix is a warning
+      # nobody fixes.
+      - name: Build
+        run: dotnet build LibraryManagement.slnx -c Release --no-restore
+
+      # --solution is REQUIRED. Passing the solution positionally fails with
+      # "Specifying a solution for 'dotnet test' should be via '--solution'".
+      #
+      # global.json selects Microsoft.Testing.Platform, which xUnit v3 targets
+      # now that the .NET 10 SDK has retired the VSTest bridge.
+      - name: Test
+        run: dotnet test --solution LibraryManagement.slnx -c Release --no-build
+
+  security:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore LibraryManagement.slnx
+
+      # Transitive dependencies matter more than direct ones here: a CVE is far
+      # likelier to arrive in a package nobody chose explicitly.
+      #
+      # `dotnet list package --vulnerable` exits 0 even when it finds something,
+      # so the exit code cannot be the signal - the output has to be inspected.
+      - name: Check for vulnerable packages
+        run: |
+          dotnet list LibraryManagement.slnx package --vulnerable --include-transitive \
+            > vulnerable.txt 2>&1
+          cat vulnerable.txt
+          if grep -qiE 'has the following vulnerable packages' vulnerable.txt; then
+            echo "::error::Vulnerable NuGet packages detected - see the output above."
+            exit 1
+          fi
+          echo "No vulnerable packages found."
+
+      # Deprecated is a warning, not a failure: a package can be deprecated with
+      # no replacement available, and failing the build would force either a
+      # rushed migration or a permanently red pipeline.
+      - name: Check for deprecated packages
+        continue-on-error: true
+        run: dotnet list LibraryManagement.slnx package --deprecated --include-transitive
