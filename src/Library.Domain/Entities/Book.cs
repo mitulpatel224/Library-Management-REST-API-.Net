@@ -43,7 +43,7 @@ public sealed class Book : AuditableEntity
         int? pageCount,
         string? description)
     {
-        Isbn = isbn;
+        Isbn = isbn.Value;
         Title = title;
         Subtitle = subtitle;
         CategoryId = categoryId;
@@ -55,41 +55,34 @@ public sealed class Book : AuditableEntity
     }
 
     /// <summary>
-    /// The persisted ISBN column: 13 plain digits.
+    /// The ISBN-13 as stored: 13 digits, no hyphens. Unique across the catalogue.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why a backing field instead of mapping <see cref="Isbn"/> through an EF
-    /// value converter.</b> A converter makes the whole <c>Isbn</c> object the
-    /// mapped property, and EF then applies that conversion to <i>both</i> sides
-    /// of any comparison. Equality survives that - the constant converts
-    /// cleanly - but a <c>LIKE</c> does not: EF tries to convert the pattern
-    /// <c>"%design%"</c> into an <c>Isbn</c> and throws
-    /// <c>InvalidCastException</c> at parameter binding.
+    /// <b>A plain string, deliberately — not a mapped <see cref="ValueObjects.Isbn"/>.</b>
+    /// This is the pattern the whole solution follows for value objects, and it
+    /// was arrived at by getting it wrong twice.
     /// </para>
     /// <para>
-    /// Storing a plain string in this field and wrapping it in the property below
-    /// gives both halves: the database sees an ordinary indexable
-    /// <c>TEXT</c>/<c>NVARCHAR</c> column that <c>LIKE</c> and range queries work
-    /// on normally, while the domain still hands out a validated
-    /// <see cref="ValueObjects.Isbn"/> that cannot hold a malformed value.
+    /// Mapping the value object through an EF value converter looks correct and
+    /// breaks every SQL operation except equality. EF applies the conversion to
+    /// <i>both</i> sides of a comparison, so <c>LIKE '%design%'</c> tries to
+    /// convert the pattern into an <c>Isbn</c> and throws at parameter binding.
+    /// Hiding the column behind a private field fixes <c>LIKE</c> but leaves the
+    /// property unmapped, so <c>ORDER BY</c> on it throws too — a bug that
+    /// shipped here and went unnoticed because nothing exercised
+    /// <c>?sortBy=isbn</c>.
     /// </para>
     /// <para>
-    /// Queries address this field by name - <c>EF.Property&lt;string&gt;(b, "_isbn")</c> -
-    /// which is what <see cref="IsbnPropertyName"/> exists to keep in one place.
+    /// So: <b>the entity stores the primitive, and the value object guards the
+    /// boundary.</b> <see cref="Create"/> takes an <see cref="ValueObjects.Isbn"/>,
+    /// which cannot be constructed from a malformed input — a book with an
+    /// invalid ISBN is still unrepresentable. What changes is that persistence
+    /// sees an ordinary indexable column, so filtering, searching and sorting
+    /// all behave like any other string.
     /// </para>
     /// </remarks>
-    private string _isbn = null!;
-
-    /// <summary>The EF property name of the ISBN column, for use in queries.</summary>
-    public const string IsbnPropertyName = "_isbn";
-
-    /// <summary>Validated ISBN-13. Unique across the catalogue.</summary>
-    public Isbn Isbn
-    {
-        get => ValueObjects.Isbn.FromTrustedValue(_isbn);
-        private set => _isbn = value.Value;
-    }
+    public string Isbn { get; private set; } = null!;
 
     public string Title { get; private set; } = null!;
 

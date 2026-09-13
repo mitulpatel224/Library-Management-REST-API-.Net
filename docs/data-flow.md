@@ -173,6 +173,119 @@ behaviour — rather than something each of forty actions has to remember.
 
 ---
 
+## Registering a member
+
+Two saves in one transaction, because the membership number is derived from a key
+the database does not assign until the insert completes.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as ValidationFilter
+    participant S as MemberService
+    participant R as MemberRepository
+    participant DB as Database
+
+    C->>F: POST /api/members
+    F->>F: CreateMemberRequestValidator<br/>(shape, lengths, joinedOn bounds)
+    alt invalid
+        F-->>C: 422 validation.failed + per-field errors
+    end
+    F->>S: RegisterAsync(request)
+
+    S->>S: Email.Create - validates AND lower-cases
+    S->>S: PhoneNumber.Create - strips formatting
+
+    S->>R: EmailExistsAsync(normalised)
+    R->>DB: SELECT 1 FROM Members WHERE Email = @e
+    alt already registered
+        S-->>C: 409 member.duplicate_email
+    end
+
+    S->>R: MembershipTypeExistsAsync(id)
+    R->>DB: SELECT 1 FROM MembershipTypes WHERE Id = @id
+    alt missing
+        S-->>C: 422 member.membership_type_not_found
+    end
+
+    S->>S: Member.Create(...) - enforces name,<br/>type and the 1900 join-date floor
+    S->>R: Add(member)
+    S->>DB: SaveChanges  (1) INSERT - key assigned here
+    S->>S: member.AssignMembershipNumber()<br/>MEM-{JoinedOn:yyyy}-{Id:00000}
+    S->>DB: SaveChanges  (2) UPDATE with the number
+
+    S->>R: GetByIdAsync(id)
+    R->>DB: SELECT ... JOIN MembershipTypes
+    S-->>C: 201 + Location: /api/members/{id}
+```
+
+### Why two saves rather than one
+
+The number embeds the surrogate key, and the key does not exist until the row is
+inserted. The alternatives were worse: a client-supplied number lets a caller
+claim an identifier that is meant to be issued, and a separate sequence table adds
+a second thing to keep in step with the first.
+
+Both saves share one `DbContext` and therefore one ambient transaction, so a
+failure on the second rolls back the first. **There is no window in which a member
+exists without a number** — which matters because the number is the only
+identifier the librarian can see.
+
+### Why normalisation happens before the uniqueness check
+
+`Email.Create` lower-cases, and the check compares the normalised value. Reversed,
+`ASHA@EXAMPLE.COM` would pass a check against the stored `asha@example.com` and
+then fail at the unique index — a 500 where a 409 was correct.
+
+### Where each rule lives, and why it is not duplication
+
+| Rule | Validator | Entity | Database |
+|---|---|---|---|
+| Name present, ≤ 200 chars | per-field message | invariant | `NOT NULL`, length |
+| Email well-formed | per-field message | `Email.Create` throws | length |
+| Email unique | — | — | `IX_Members_Email UNIQUE` |
+| `joinedOn` ≥ 1900-01-01 | per-field message | `Member.Create` throws | — |
+| `joinedOn` ≤ today | per-field message | — (no clock in Domain) | — |
+
+The validator produces the message a form can display beside the offending input.
+The entity guarantees the rule holds for callers that never pass through a
+validator — the seeder, and any future bulk import. The database is the last line,
+and the only one that can enforce uniqueness under concurrency.
+
+The one deliberate hole: "not in the future" cannot live in the entity, because
+the entity has no clock and reading one would be the `DateTime.Now` this codebase
+forbids everywhere. So a bulk import could, today, set a future join date.
+
+---
+
+## Changing a member's status
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: register
+    Active --> Suspended: suspend (reason required)
+    Suspended --> Active: reactivate
+    Active --> Expired: expire
+    Expired --> Active: reactivate
+    Suspended --> Expired: expire
+    Active --> Cancelled: cancel
+    Suspended --> Cancelled: cancel
+    Expired --> Cancelled: cancel
+    Cancelled --> [*]: terminal
+```
+
+`Cancelled` has no outbound edge. Suspend, reactivate and expire all return
+**409 `member.cancelled`** against it, and a second cancel returns **409
+`member.already_cancelled`** rather than overwriting the closure reason.
+
+Reactivating an *already-active* member returns 200 and changes nothing. Cancelling
+an already-cancelled one returns 409. The asymmetry is deliberate: reactivate
+carries no payload, so returning early discards no caller intent, whereas cancel
+carries a reason that cannot be honoured — and answering 200 while discarding it
+would report a revision that never happened.
+
+---
+
 ## Issuing a loan (Phase 4 — planned)
 
 The flow that the whole system exists for, including the concurrency path.

@@ -89,7 +89,7 @@ public sealed class BookRepository : IBookRepository
             .Select(book => new BookSummaryDto
             {
                 Id = book.Id,
-                Isbn = EF.Property<string>(book, Book.IsbnPropertyName),
+                Isbn = book.Isbn,
                 Title = book.Title,
                 Subtitle = book.Subtitle,
                 CategoryName = book.Category.Name,
@@ -135,16 +135,14 @@ public sealed class BookRepository : IBookRepository
             // as a parameter - the wildcards are part of the VALUE, not the
             // statement - so this is not an injection vector.
             //
-            // ISBN is addressed through EF.Property against Book's private
-            // _isbn string field rather than through the Isbn value-object
-            // property. The field is mapped as a plain text column, so LIKE
-            // works on it exactly as it does on Title. See Book.Isbn for why the
-            // value object is deliberately NOT mapped via a value converter.
+            // Book.Isbn is an ordinary mapped string, so LIKE works on it
+            // exactly as it does on Title. See Book.Isbn for why the value
+            // object is deliberately not the mapped property.
             // ---------------------------------------------------------------
             query = query.Where(b =>
                 EF.Functions.Like(b.Title, $"%{term}%") ||
                 (b.Subtitle != null && EF.Functions.Like(b.Subtitle, $"%{term}%")) ||
-                EF.Functions.Like(EF.Property<string>(b, Book.IsbnPropertyName), $"%{term}%"));
+                EF.Functions.Like(b.Isbn, $"%{term}%"));
         }
 
         if (!string.IsNullOrWhiteSpace(request.Isbn))
@@ -158,7 +156,7 @@ public sealed class BookRepository : IBookRepository
                 // Plain string equality against the indexed column - an index
                 // seek on IX_Books_Isbn.
                 query = query.Where(b =>
-                    EF.Property<string>(b, Book.IsbnPropertyName) == isbn);
+                    b.Isbn == isbn);
             }
         }
 
@@ -260,7 +258,7 @@ public sealed class BookRepository : IBookRepository
 
         return await ProjectDetail(
                 _context.Books.AsNoTracking()
-                    .Where(b => EF.Property<string>(b, Book.IsbnPropertyName) == normalized))
+                    .Where(b => b.Isbn == normalized))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -277,7 +275,7 @@ public sealed class BookRepository : IBookRepository
         query.Select(book => new BookDetailDto
         {
             Id = book.Id,
-            Isbn = EF.Property<string>(book, Book.IsbnPropertyName),
+            Isbn = book.Isbn,
             Title = book.Title,
             Subtitle = book.Subtitle,
             Description = book.Description,
@@ -373,7 +371,7 @@ public sealed class BookRepository : IBookRepository
         return await _context.Books
             .AsNoTracking()
             .AnyAsync(
-                b => EF.Property<string>(b, Book.IsbnPropertyName) == normalized,
+                b => b.Isbn == normalized,
                 cancellationToken);
     }
 

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Library.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCatalogue : Migration
+    public partial class InitialSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -70,6 +70,24 @@ namespace Library.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MembershipTypes",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
+                    MaxConcurrentLoans = table.Column<int>(type: "INTEGER", nullable: false),
+                    LoanPeriodDays = table.Column<int>(type: "INTEGER", nullable: false),
+                    Description = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MembershipTypes", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Publishers",
                 columns: table => new
                 {
@@ -87,11 +105,41 @@ namespace Library.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Members",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    MembershipNumber = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    FullName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
+                    Email = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Phone = table.Column<string>(type: "TEXT", maxLength: 16, nullable: true),
+                    Address = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    MembershipTypeId = table.Column<int>(type: "INTEGER", nullable: false),
+                    JoinedOn = table.Column<DateOnly>(type: "TEXT", nullable: false),
+                    Status = table.Column<int>(type: "INTEGER", nullable: false),
+                    StatusReason = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Members", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Members_MembershipTypes_MembershipTypeId",
+                        column: x => x.MembershipTypeId,
+                        principalTable: "MembershipTypes",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Books",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
+                    Isbn = table.Column<string>(type: "TEXT", maxLength: 13, nullable: false),
                     Title = table.Column<string>(type: "TEXT", maxLength: 500, nullable: false),
                     Subtitle = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
                     CategoryId = table.Column<int>(type: "INTEGER", nullable: false),
@@ -100,7 +148,6 @@ namespace Library.Infrastructure.Persistence.Migrations
                     Language = table.Column<string>(type: "TEXT", maxLength: 10, nullable: true),
                     PageCount = table.Column<int>(type: "INTEGER", nullable: true),
                     Description = table.Column<string>(type: "TEXT", maxLength: 4000, nullable: true),
-                    Isbn = table.Column<string>(type: "TEXT", maxLength: 13, nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true)
                 },
@@ -268,6 +315,39 @@ namespace Library.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_Members_Email",
+                table: "Members",
+                column: "Email",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Members_FullName",
+                table: "Members",
+                column: "FullName");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Members_MembershipNumber",
+                table: "Members",
+                column: "MembershipNumber",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Members_MembershipTypeId",
+                table: "Members",
+                column: "MembershipTypeId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Members_Status_MembershipTypeId",
+                table: "Members",
+                columns: new[] { "Status", "MembershipTypeId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MembershipTypes_Name",
+                table: "MembershipTypes",
+                column: "Name",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Publishers_Name",
                 table: "Publishers",
                 column: "Name",
@@ -287,6 +367,9 @@ namespace Library.Infrastructure.Persistence.Migrations
                 name: "BookGenres");
 
             migrationBuilder.DropTable(
+                name: "Members");
+
+            migrationBuilder.DropTable(
                 name: "Authors");
 
             migrationBuilder.DropTable(
@@ -294,6 +377,9 @@ namespace Library.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "Genres");
+
+            migrationBuilder.DropTable(
+                name: "MembershipTypes");
 
             migrationBuilder.DropTable(
                 name: "Categories");

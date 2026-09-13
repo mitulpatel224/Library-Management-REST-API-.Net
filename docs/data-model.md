@@ -225,7 +225,7 @@ holds under load and one that holds only in a demo.
 
 ## Index strategy
 
-Fourteen indexes, each with a job.
+Nineteen indexes, each with a job.
 
 | Index | Table | Purpose |
 |---|---|---|
@@ -241,6 +241,11 @@ Fourteen indexes, each with a job.
 | `IX_Categories_Name` **UNIQUE** | Categories | |
 | `IX_Genres_Name`, `IX_Genres_Slug` **UNIQUE** | Genres | |
 | `IX_Publishers_Name` **UNIQUE** | Publishers | |
+| `IX_MembershipTypes_Name` **UNIQUE** | MembershipTypes | One name is one type. See the collation caveat below |
+| `IX_Members_MembershipNumber` **UNIQUE** | Members | The number printed on the card must identify one member |
+| `IX_Members_Email` **UNIQUE** | Members | One mailbox is one membership. Works because `Email` lower-cases on construction |
+| `IX_Members_FullName` | Members | The default member sort. **Not** unique — two members genuinely share a name |
+| `IX_Members_Status_MembershipTypeId` | Members | Composite, for the status and type filters |
 
 **On composite column order.** `IX_BookCopies_BookId_Status` is `(BookId, Status)`
 and not the reverse, because a composite index can only be used left-to-right.
@@ -251,6 +256,25 @@ possible values. Reversed, the index would be nearly useless for
 **On the non-unique author index.** Making `(LastName, FirstName)` unique would
 merge two different authors who happen to share a name, silently combining their
 bibliographies. The index exists for search speed, not for identity.
+`IX_Members_FullName` is non-unique for the same reason.
+
+**On uniqueness and collation — a real, provider-dependent trap.** A unique index
+is only as case-insensitive as its collation. SQL Server's default collation folds
+case; SQLite's `BINARY` does not. So `IX_Members_Email` and
+`IX_MembershipTypes_Name` do not behave identically across the two providers, and
+the difference is invisible until someone sends the same value in different
+casing.
+
+`Email` sidesteps it entirely by lower-casing in the value object before the
+value ever reaches the column — a binary index on already-normalised data is
+case-insensitive for free, on every provider.
+
+`MembershipTypes.Name` cannot use that trick, because the display casing has to
+survive. It is instead compared with `UPPER()` on both sides in the repository,
+which translates on both providers. Two residual gaps, stated rather than hidden:
+SQLite's `UPPER()` folds ASCII only, and an application-level check cannot stop a
+race between two concurrent inserts. Closing both needs `COLLATE NOCASE` on the
+column, which makes the migration model provider-specific.
 
 ---
 
@@ -266,6 +290,7 @@ Chosen per relationship. A blanket policy would be wrong in at least one place.
 | `BookAuthor → Book/Author` | `CASCADE` | A join row is meaningless once either end is gone |
 | `BookGenre → Book/Genre` | `CASCADE` | Same |
 | `Category → Category` | `RESTRICT` | Deleting *Fiction* must not take *Science Fiction* with it |
+| `Member → MembershipType` | `RESTRICT` | Deleting a membership type must not delete the members holding it. Re-assign them first |
 
 `CASCADE` everywhere is the dangerous default: one careless delete of a popular
 category would remove hundreds of books with no warning and no undo.
@@ -323,6 +348,48 @@ it — and reinterprets every existing row in the database.
 
 Storing as `int` rather than `string` trades raw-SQL readability for the property
 that renaming a C# member is not a breaking schema change.
+
+---
+
+## Member and MembershipType
+
+### MembershipType
+
+| Column | Type | Notes |
+|---|---|---|
+| `Id` | int, PK | |
+| `Name` | nvarchar(50), **unique** | Compared case-insensitively; display casing preserved |
+| `Description` | nvarchar(500), null | |
+| `MaxConcurrentLoans` | int | 1–50. The limit Phase 4 checks before issuing |
+| `LoanPeriodDays` | int | 1–365. The due date derives from this |
+
+### Member
+
+| Column | Type | Notes |
+|---|---|---|
+| `Id` | int, PK | Surrogate key. Internal |
+| `MembershipNumber` | nvarchar(20), **unique** | `MEM-2026-00042`. Server-issued, immutable, printed on the card |
+| `FullName` | nvarchar(200) | Indexed for the default sort |
+| `Email` | nvarchar(256), **unique** | Stored lower-cased by the `Email` value object |
+| `Phone` | nvarchar(16), null | Stored normalised — digits and a leading `+` only |
+| `Address` | nvarchar(500), null | |
+| `MembershipTypeId` | int, FK → MembershipTypes | `RESTRICT` on delete |
+| `Status` | int | `MemberStatus`, persisted as its explicit ordinal; serialised as a **name** over HTTP |
+| `StatusReason` | nvarchar(500), null | Why suspended or cancelled. Write-once for a cancellation |
+| `JoinedOn` | date | Between 1900-01-01 and today. Feeds the membership number's year segment |
+
+**Why `Status` is an int in the database and a string on the wire.** The column
+stores the ordinal because `MemberStatus` numbers its members explicitly —
+inserting a value in the middle would otherwise reinterpret every existing row.
+The API sends the name because an ordinal is unreadable without the enum
+definition beside it, and a client branching on the number breaks silently for
+exactly the same reason the explicit numbering exists.
+
+**Why the number and the key both exist.** The surrogate key is what foreign keys
+point at; the membership number is what a librarian reads off a card. Deriving the
+number from the key means registration saves twice — insert to obtain the key,
+then update with the number — inside one transaction, so no member ever exists
+without a number.
 
 ---
 

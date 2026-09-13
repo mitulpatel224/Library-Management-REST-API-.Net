@@ -174,7 +174,7 @@ concurrent issue requests can both pass that check. Only one can win the index.
 
 ## API surface
 
-Implemented today (Phase 2, read side):
+Implemented today (Phases 2 and 3):
 
 | Method | Route | Description |
 |---|---|---|
@@ -182,6 +182,24 @@ Implemented today (Phase 2, read side):
 | `GET` | `/api/books/{id}` | One book with its copies |
 | `GET` | `/api/books/isbn/{isbn}` | Lookup by ISBN, hyphenated or not |
 | `GET` | `/api/books/{id}/copies` | Physical copies of a book |
+| `POST` | `/api/books` | Catalogue a new book |
+| `PUT` | `/api/books/{id}` | Replace a book's details, authors and genres |
+| `DELETE` | `/api/books/{id}` | Remove a book and its copies |
+| `POST` | `/api/books/{id}/copies` | Add a physical copy |
+| `PUT` | `/api/copies/{id}` | Update a copy's condition or shelf location |
+| `DELETE` | `/api/copies/{id}` | Remove a physical copy |
+| `GET` | `/api/members` | Search, filter, sort and page members |
+| `GET` | `/api/members/{id}` | One member |
+| `GET` | `/api/members/number/{number}` | Lookup by printed membership number |
+| `POST` | `/api/members` | Register a member; the server issues the number |
+| `PUT` | `/api/members/{id}` | Update contact details and membership type |
+| `POST` | `/api/members/{id}/suspend` | Withdraw borrowing rights, with a reason |
+| `POST` | `/api/members/{id}/reactivate` | Restore borrowing rights |
+| `POST` | `/api/members/{id}/expire` | Mark lapsed through time, not conduct |
+| `POST` | `/api/members/{id}/cancel` | Close a membership (terminal) |
+| `GET` | `/api/membership-types` | Types with their limits and member counts |
+| `GET` | `/api/membership-types/{id}` | One membership type |
+| `POST` | `/api/membership-types` | Create a membership type |
 | `GET` | `/health/live` | Liveness — does not touch the database |
 | `GET` | `/health/ready` | Readiness — includes the database |
 
@@ -370,7 +388,7 @@ an executable:
 |---|---|---|
 | 1 | Boilerplate, git, tooling | ✅ Done |
 | 2 | Book APIs | 🔨 Read side done; writes in progress |
-| 3 | Reader / Member APIs | ⬜ |
+| 3 | Reader / Member APIs | ✅ Endpoints done; member tests outstanding |
 | 4 | Lending APIs — loans, overdue, fines | ⬜ |
 | 5 | Authentication & authorization | ⬜ |
 | 6 | Import books from CSV/JSON | ⬜ |

@@ -68,13 +68,42 @@ try
             // -------------------------------------------------------------
             options.JsonSerializerOptions.UnmappedMemberHandling =
                 System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow;
+
+            // -------------------------------------------------------------
+            // Enums on the wire as names, not ordinals.
+            //
+            // MemberStatus.Active serialised as 0, which pushes two problems
+            // onto every client. The response is unreadable without the enum
+            // definition beside it - "status": 0 says nothing - and branching
+            // on the number silently changes meaning the day a value is
+            // inserted in the middle. MemberStatus already numbers its members
+            // explicitly to survive that, which only protects the DATABASE;
+            // this protects the API.
+            //
+            // It also matches the stated error contract, where clients branch
+            // on stable strings (ErrorCode) rather than magic numbers.
+            //
+            // Reads stay permissive: the converter accepts the name and the
+            // number, so a client sending 0 today keeps working.
+            // -------------------------------------------------------------
+            options.JsonSerializerOptions.Converters.Add(
+                new System.Text.Json.Serialization.JsonStringEnumConverter());
+        })
+        .ConfigureApiBehaviorOptions(options =>
+        {
+            // Model binding fails BEFORE any action runs, so GlobalExceptionHandler
+            // never sees it and MVC writes its own 400 - a different shape, with no
+            // errorCode, naming our internal types. See RequestProblemDetails.
+            options.InvalidModelStateResponseFactory =
+                RequestProblemDetails.ForInvalidModelState;
         });
 
     // ProblemDetails (RFC 9457) as the uniform error shape for the whole API.
     // Registering it also converts framework-generated failures - 404 on an
     // unmatched route, 405 on a wrong verb - into the same JSON shape, so a
     // client never has to parse two different error formats.
-    builder.Services.AddProblemDetails();
+    builder.Services.AddProblemDetails(options =>
+        options.CustomizeProblemDetails = RequestProblemDetails.Customize);
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
     // OpenAPI document generation is built into ASP.NET Core 9+; Swashbuckle is

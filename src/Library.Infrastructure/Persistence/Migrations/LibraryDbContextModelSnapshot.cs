@@ -70,6 +70,11 @@ namespace Library.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Isbn")
+                        .IsRequired()
+                        .HasMaxLength(13)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Language")
                         .HasMaxLength(10)
                         .HasColumnType("TEXT");
@@ -95,26 +100,20 @@ namespace Library.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("_isbn")
-                        .IsRequired()
-                        .HasMaxLength(13)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("Isbn");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId")
                         .HasDatabaseName("IX_Books_CategoryId");
+
+                    b.HasIndex("Isbn")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Books_Isbn");
 
                     b.HasIndex("PublisherId")
                         .HasDatabaseName("IX_Books_PublisherId");
 
                     b.HasIndex("Title")
                         .HasDatabaseName("IX_Books_Title");
-
-                    b.HasIndex("_isbn")
-                        .IsUnique()
-                        .HasDatabaseName("IX_Books_Isbn");
 
                     b.ToTable("Books", (string)null);
                 });
@@ -277,6 +276,111 @@ namespace Library.Infrastructure.Persistence.Migrations
                     b.ToTable("Genres", (string)null);
                 });
 
+            modelBuilder.Entity("Library.Domain.Entities.Member", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("JoinedOn")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MembershipNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MembershipTypeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Members_Email");
+
+                    b.HasIndex("FullName")
+                        .HasDatabaseName("IX_Members_FullName");
+
+                    b.HasIndex("MembershipNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Members_MembershipNumber");
+
+                    b.HasIndex("MembershipTypeId");
+
+                    b.HasIndex("Status", "MembershipTypeId")
+                        .HasDatabaseName("IX_Members_Status_MembershipTypeId");
+
+                    b.ToTable("Members", (string)null);
+                });
+
+            modelBuilder.Entity("Library.Domain.Entities.MembershipType", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LoanPeriodDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxConcurrentLoans")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MembershipTypes_Name");
+
+                    b.ToTable("MembershipTypes", (string)null);
+                });
+
             modelBuilder.Entity("Library.Domain.Entities.Publisher", b =>
                 {
                     b.Property<int>("Id")
@@ -388,6 +492,17 @@ namespace Library.Infrastructure.Persistence.Migrations
                     b.Navigation("ParentCategory");
                 });
 
+            modelBuilder.Entity("Library.Domain.Entities.Member", b =>
+                {
+                    b.HasOne("Library.Domain.Entities.MembershipType", "MembershipType")
+                        .WithMany("Members")
+                        .HasForeignKey("MembershipTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MembershipType");
+                });
+
             modelBuilder.Entity("Library.Domain.Entities.Author", b =>
                 {
                     b.Navigation("BookAuthors");
@@ -412,6 +527,11 @@ namespace Library.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Library.Domain.Entities.Genre", b =>
                 {
                     b.Navigation("BookGenres");
+                });
+
+            modelBuilder.Entity("Library.Domain.Entities.MembershipType", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Library.Domain.Entities.Publisher", b =>

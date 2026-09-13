@@ -39,6 +39,7 @@ public static class DependencyInjection
         // bug - the service would capture one DbContext and reuse it across every
         // concurrent request, which DbContext is explicitly not safe for.
         services.AddScoped<Books.IBookService, Books.BookService>();
+        services.AddScoped<Members.IMemberService, Members.MemberService>();
 
         return services;
     }

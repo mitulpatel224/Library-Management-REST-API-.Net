@@ -351,10 +351,132 @@ public sealed partial class DatabaseSeeder
 
         int totalCopies = seedBooks.Sum(b => b.CopyCount);
         LogSeedCompleted(seedBooks.Count, totalCopies);
+
+        await SeedMembersAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Seeds membership types and a spread of members.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Guarded separately from the catalogue so it still runs on a database
+    /// seeded before members existed — the outer check returns early once any
+    /// book is present, which would otherwise leave an upgraded database with a
+    /// catalogue and no members.
+    /// </para>
+    /// <para>
+    /// The members deliberately cover every <c>MemberStatus</c>, so Phase 4's
+    /// "only an active member may borrow" rule has something to fail against
+    /// without a tester having to construct it first.
+    /// </para>
+    /// </remarks>
+    private async Task SeedMembersAsync(CancellationToken cancellationToken)
+    {
+        if (await _context.Members.AnyAsync(cancellationToken))
+        {
+            return;
+        }
+
+        // Loan limits and periods that Phase 4 reads directly: MaxConcurrentLoans
+        // gates issuing, LoanPeriodDays computes DueAt.
+        MembershipType standard = MembershipType.Create(
+            "Standard", maxConcurrentLoans: 5, loanPeriodDays: 14,
+            "General adult membership.");
+
+        MembershipType student = MembershipType.Create(
+            "Student", maxConcurrentLoans: 8, loanPeriodDays: 28,
+            "Longer loans for study; requires proof of enrolment.");
+
+        MembershipType staff = MembershipType.Create(
+            "Staff", maxConcurrentLoans: 15, loanPeriodDays: 42,
+            "Library and academic staff.");
+
+        MembershipType junior = MembershipType.Create(
+            "Junior", maxConcurrentLoans: 3, loanPeriodDays: 21,
+            "Under 16. Restricted to the children's collection.");
+
+        _context.MembershipTypes.AddRange(standard, student, staff, junior);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var seedMembers = new List<(Member Member, Action<Member>? AfterSave)>
+        {
+            (NewMember("Priya Sharma", "priya.sharma@example.com", standard.Id,
+                new DateOnly(2024, 3, 12), "+91 98765 43210"), null),
+
+            (NewMember("Arjun Mehta", "arjun.mehta@example.com", student.Id,
+                new DateOnly(2025, 9, 1), "+91 91234 56789"), null),
+
+            (NewMember("Fatima Khan", "fatima.khan@example.com", staff.Id,
+                new DateOnly(2022, 1, 17), "+91 99887 76655"), null),
+
+            (NewMember("Rohan Desai", "rohan.desai@example.com", standard.Id,
+                new DateOnly(2025, 6, 30), null), null),
+
+            (NewMember("Ananya Iyer", "ananya.iyer@example.com", junior.Id,
+                new DateOnly(2026, 2, 14), "+91 90000 11111"), null),
+
+            (NewMember("Vikram Nair", "vikram.nair@example.com", student.Id,
+                new DateOnly(2024, 11, 5), null), null),
+
+            // Suspended: gives Phase 4 a member who must be refused a loan.
+            (NewMember("Kabir Singh", "kabir.singh@example.com", standard.Id,
+                new DateOnly(2023, 8, 22), "+91 98111 22333"),
+                m => m.Suspend("Unpaid fines exceeding 500 rupees.")),
+
+            // Expired: lapsed through time rather than conduct.
+            (NewMember("Meera Joshi", "meera.joshi@example.com", standard.Id,
+                new DateOnly(2021, 4, 3), null),
+                m => m.Expire()),
+
+            // Cancelled: terminal, and retained so loan history survives.
+            (NewMember("Sanjay Gupta", "sanjay.gupta@example.com", standard.Id,
+                new DateOnly(2020, 7, 19), null),
+                m => m.Cancel("Relocated.")),
+        };
+
+        foreach ((Member member, _) in seedMembers)
+        {
+            _context.Members.Add(member);
+        }
+
+        // Saved before the membership numbers are assigned, because each number
+        // is derived from the id the database issues on insert.
+        await _context.SaveChangesAsync(cancellationToken);
+
+        foreach ((Member member, Action<Member>? afterSave) in seedMembers)
+        {
+            member.AssignMembershipNumber();
+            afterSave?.Invoke(member);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        LogMembersSeeded(seedMembers.Count, 4);
+    }
+
+    private static Member NewMember(
+        string fullName, string email, int membershipTypeId, DateOnly joinedOn, string? phone)
+    {
+        // Through the value objects and the factory, so seed data passes exactly
+        // the validation real input does. A malformed address here fails loudly
+        // at startup rather than quietly populating a broken row.
+        return Member.Create(
+            fullName,
+            Email.Create(email),
+            membershipTypeId,
+            joinedOn,
+            phone is null ? null : PhoneNumber.Create(phone));
     }
 
     // Source-generated logging - see GlobalExceptionHandler for why analyzer
     // CA1848 insists on this over _logger.LogInformation("...", args).
+
+    [LoggerMessage(
+        EventId = 1003,
+        Level = LogLevel.Information,
+        Message = "Seeded {MemberCount} members across {TypeCount} membership types.")]
+    private partial void LogMembersSeeded(int memberCount, int typeCount);
 
     [LoggerMessage(
         EventId = 1000,

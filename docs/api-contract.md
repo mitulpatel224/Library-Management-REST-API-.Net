@@ -26,6 +26,12 @@ so cannot be silently reinterpreted in another time zone.
 
 ## Status codes
 
+**Enums travel as names, not numbers.** `"status": "Active"`, never `"status": 0`.
+An ordinal is unreadable without the enum definition beside it, and silently
+changes meaning if a value is ever inserted in the middle. Reads stay permissive:
+the name and the number are both accepted on input.
+
+
 | Code | When | Notes |
 |---|---|---|
 | `200 OK` | Successful read or update | An empty result set is still 200 |
@@ -35,7 +41,9 @@ so cannot be silently reinterpreted in another time zone.
 | `401 Unauthorized` | Missing or invalid token | Phase 5. Means *unauthenticated* |
 | `403 Forbidden` | Authenticated but not permitted | Phase 5 |
 | `404 Not Found` | Resource does not exist | |
+| `405 Method Not Allowed` | Wrong verb for the route | |
 | `409 Conflict` | Collides with current state | Copy already on loan; duplicate ISBN |
+| `415 Unsupported Media Type` | Missing or wrong `Content-Type` | Send `application/json` |
 | `422 Unprocessable Entity` | Well formed, but a rule says no | Validation failures, business rules |
 | `500 Internal Server Error` | A bug | Generic message only — details never leave the server |
 
@@ -112,10 +120,48 @@ Validation failures add a per-field `errors` object:
 | `author.last_name_required` | 422 | |
 | `genre.name_required` | 422 | |
 | `publisher.name_required` | 422 | |
+| `member.not_found` | 404 | |
+| `member.duplicate_email` | 409 | Compared case-insensitively - the address is normalised first |
+| `member.already_cancelled` | 409 | Closure is written once; the original reason stands |
+| `member.cancelled` | 409 | Cancelled is terminal: cannot suspend, reactivate or expire |
+| `member.membership_type_not_found` | 422 | |
+| `member.name_required` | 422 | |
+| `member.membership_type_required` | 422 | |
+| `member.suspension_reason_required` | 422 | |
+| `member.join_date_too_early` | 422 | Before 1900-01-01 |
+| `member.invalid_email` | 422 | |
+| `membership_type.not_found` | 404 | |
+| `membership_type.duplicate_name` | 409 | Case-insensitive; the message quotes the STORED spelling |
 | `validation.failed` | 422 | See the `errors` object |
 | `auth.forbidden` | 403 | Phase 5 |
 | `request.cancelled` | 499 | The client disconnected |
 | `server.unexpected_error` | 500 | A bug. Details are in the log, never the response |
+
+#### Request-level codes
+
+Model binding fails before any action runs, so these never reach the domain.
+They carry the same envelope as every other error - see **Every error carries a
+code** below.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `request.body_required` | 400 | Body was empty |
+| `request.malformed_json` | 400 | Body is not valid JSON |
+| `request.unknown_property` | 400 | A property the endpoint does not accept. See `errors` |
+| `request.type_mismatch` | 400 | Right shape, wrong type for a field |
+| `request.invalid` | 400 | Query or route value could not be bound |
+| `request.unsupported_media_type` | 415 | Missing or wrong `Content-Type` |
+| `request.method_not_allowed` | 405 | |
+| `request.not_acceptable` | 406 | |
+| `route.not_found` | 404 | No route matched. Distinct from `<resource>.not_found` |
+| `request.rate_limited` | 429 | |
+
+**Every error carries a code.** Including the ones the framework generates
+before our code runs - malformed JSON, a wrong `Content-Type`, an unmatched
+route. Those used to fall through to ASP.NET Core's default ProblemDetails,
+which has no `errorCode` at all, leaving a client told to branch on the code
+with nothing to branch on for a whole family of responses. They also named
+internal .NET types in their messages; those messages are now rewritten.
 
 **On 500.** The response carries a generic message and the `traceId` — nothing
 more. A leaked stack trace hands an attacker framework versions, file paths, and
@@ -294,6 +340,239 @@ curl "http://localhost:5112/api/books/isbn/9780132350884"   # identical result
 An empty array means the title is catalogued but the library holds no physical
 copy — genuinely different from the book not existing, which is why the endpoint
 checks existence rather than returning `[]` for both.
+
+---
+
+### `GET /api/members`
+
+Search, filter, sort and page. **200** always — an empty page is a valid answer ·
+**422** if `joinedTo` is earlier than `joinedFrom`.
+
+```
+GET /api/members
+    ?search=            free text across name, membership number and email
+    &status=            Active | Suspended | Expired | Cancelled
+    &membershipTypeId=  exact
+    &joinedFrom=        &joinedTo=      ISO dates
+    &canBorrowOnly=     true -> only members currently permitted to borrow
+    &sortBy=            name | email | joined | status | type | number
+    &sortDir=           asc | desc
+    &page=1             &pageSize=20    (max 100)
+```
+
+`canBorrowOnly` is a convenience over `status=Active` that survives the
+eligibility rule getting more complex. Phase 4 may well make borrowing depend on
+unpaid fines, at which point this filter keeps meaning what it says and
+`status=Active` would not.
+
+Page, page size and an unknown `sortBy` are **clamped**, not rejected — a caller
+asking for too much still gets a useful answer. An inverted date range is
+**refused**, because there is nothing sensible to clamp it to and the empty page
+it would otherwise return is indistinguishable from a real result.
+
+```json
+{
+  "items": [
+    {
+      "id": 24,
+      "membershipNumber": "MEM-2026-00024",
+      "fullName": "Asha Nair",
+      "email": "asha.nair@example.com",
+      "phone": "+919825044556",
+      "membershipTypeName": "Student",
+      "status": "Active",
+      "joinedOn": "2026-09-13",
+      "canBorrow": true
+    }
+  ],
+  "page": 1,
+  "pageSize": 2,
+  "totalCount": 1,
+  "totalPages": 1,
+  "hasPreviousPage": false,
+  "hasNextPage": false
+}
+```
+
+---
+
+### `GET /api/members/{id}`
+
+**200** · **404** `member.not_found`
+
+---
+
+### `GET /api/members/number/{membershipNumber}`
+
+**200** · **404** `member.not_found`
+
+The lookup a librarian actually performs — the number is printed on the card in
+front of them, the surrogate id is not. Case-insensitive, so
+`mem-2026-00024` resolves.
+
+---
+
+### `POST /api/members`
+
+**201** · **409** `member.duplicate_email` · **422** validation or
+`member.membership_type_not_found`
+
+```json
+{
+  "fullName": "Asha Nair",
+  "email": "asha.nair@example.com",
+  "phone": "+91 98250 44556",
+  "address": "22 MG Road, Bengaluru 560001",
+  "membershipTypeId": 2,
+  "joinedOn": "2026-09-13"
+}
+```
+
+Note what is **absent**: `membershipNumber` and `status`. The number is derived
+from the database key after insert and cannot be supplied; status is reachable
+only through the transition endpoints. Sending either returns **400**
+`request.unknown_property` rather than being ignored.
+
+`joinedOn` is optional and defaults to today. It must fall between
+**1900-01-01** and today inclusive — the join year is baked into the membership
+number, which is immutable once issued, so a mis-keyed century is permanent.
+
+**201** response — `Location: /api/members/24`:
+
+```json
+{
+  "id": 24,
+  "membershipNumber": "MEM-2026-00024",
+  "fullName": "Asha Nair",
+  "email": "asha.nair@example.com",
+  "phone": "+919825044556",
+  "address": "22 MG Road, Bengaluru 560001",
+  "membershipTypeId": 2,
+  "membershipTypeName": "Student",
+  "maxConcurrentLoans": 8,
+  "loanPeriodDays": 28,
+  "status": "Active",
+  "statusReason": null,
+  "canBorrow": true,
+  "joinedOn": "2026-09-13",
+  "createdAt": "2026-09-13T16:10:38.2740692+00:00",
+  "updatedAt": "2026-09-13T16:10:38.3622589+00:00"
+}
+```
+
+The phone was sent as `+91 98250 44556` and stored as `+919825044556` — the value
+object normalises, so formatting differences never become data differences. Email
+is lower-cased for the same reason, which is what makes the unique index mean what
+it appears to mean: `ASHA@EXAMPLE.COM` returns **409**, not a second row.
+
+---
+
+### `PUT /api/members/{id}`
+
+**200** · **404** · **409** `member.duplicate_email` · **422**
+
+Contact details and membership type only. Status is deliberately not settable
+here — a routine correction to a phone number must not be able to restore
+borrowing rights a librarian withdrew.
+
+Re-saving a member with their own unchanged email returns **200**, not a false
+409: the uniqueness check excludes the row being edited.
+
+---
+
+### Status transitions
+
+Each is its own endpoint rather than a `status` field, because "suspend this
+member, with this reason" is a different operation from "correct this member's
+phone number".
+
+| Route | Effect | Refuses |
+|---|---|---|
+| `POST /api/members/{id}/suspend` | `Suspended`, reason recorded | **422** without a reason · **409** `member.cancelled` |
+| `POST /api/members/{id}/reactivate` | `Active`, reason cleared | **409** `member.cancelled` |
+| `POST /api/members/{id}/expire` | `Expired` — lapsed by time, not conduct | **409** `member.cancelled` |
+| `POST /api/members/{id}/cancel` | `Cancelled`, terminal | **409** `member.already_cancelled` |
+
+All four return **404** `member.not_found` for an unknown id, and **200** with the
+full member on success.
+
+**Reactivate is idempotent; cancel is not.** Reactivating an already-active member
+returns 200 and changes nothing — it carries no payload, so there is no caller
+intent to discard. Cancelling an already-cancelled member returns **409**: the
+call carries a *new* reason that cannot be honoured, and answering 200 while
+discarding it would report a revision that did not happen. The closure reason may
+document a data protection request, so it is written once.
+
+Suspending an already-suspended member **does** revise the reason, and that is
+deliberate: a suspension is reversible and ongoing, so its grounds can legitimately
+change as fines accumulate. A cancellation is terminal and its reason is history.
+
+```json
+{ "reason": "Unpaid fine of Rs.150" }
+```
+
+Required for `suspend`, optional for `cancel`, not accepted by the other two.
+Maximum 500 characters.
+
+---
+
+### `GET /api/membership-types`
+
+**200** with an array. `memberCount` is counted in SQL — one query, not one per
+type.
+
+```json
+[
+  {
+    "id": 2,
+    "name": "Student",
+    "description": "Longer loans for study; requires proof of enrolment.",
+    "maxConcurrentLoans": 8,
+    "loanPeriodDays": 28,
+    "memberCount": 3
+  }
+]
+```
+
+---
+
+### `GET /api/membership-types/{id}`
+
+**200** · **404** `membership_type.not_found`
+
+---
+
+### `POST /api/membership-types`
+
+**201** · **409** `membership_type.duplicate_name` · **422** validation
+
+```json
+{
+  "name": "Community Partner",
+  "description": "Local partner organisations",
+  "maxConcurrentLoans": 4,
+  "loanPeriodDays": 21
+}
+```
+
+`maxConcurrentLoans` must be 1–50, `loanPeriodDays` 1–365, `name` 1–50 characters.
+
+Names collide **case-insensitively**, and the conflict message quotes the spelling
+already on file rather than the one sent — a librarian told
+`'sTaNdArD' already exists` would go looking for a type that is not there under
+that name:
+
+```json
+{
+  "type": "https://httpstatuses.io/409",
+  "title": "Request conflicts with the current state of the resource",
+  "status": 409,
+  "detail": "A membership type named 'Standard' already exists.",
+  "instance": "POST /api/membership-types",
+  "errorCode": "membership_type.duplicate_name",
+  "traceId": "00-3560002ad0a5d5bbca03b02449d27b0f-fb730f63b849896e-00"
+}
+```
 
 ---
 

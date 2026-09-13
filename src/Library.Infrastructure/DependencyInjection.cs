@@ -1,5 +1,6 @@
 using Library.Application.Books;
 using Library.Application.Common.Abstractions;
+using Library.Application.Members;
 using Library.Infrastructure.Persistence;
 using Library.Infrastructure.Repositories;
 using Library.Infrastructure.Services;
@@ -48,6 +49,7 @@ public static class DependencyInjection
         // Inversion: at compile time Application knows nothing of this project,
         // and at startup this project supplies what Application asked for.
         services.AddScoped<IBookRepository, BookRepository>();
+        services.AddScoped<IMemberRepository, MemberRepository>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

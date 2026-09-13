@@ -29,28 +29,24 @@ public sealed class BookConfiguration : IEntityTypeConfiguration<Book>
         builder.HasKey(b => b.Id);
 
         // ---------------------------------------------------------------
-        // ISBN maps from the private _isbn STRING FIELD, not from the Isbn
-        // value-object property.
+        // An ordinary string column - NO value converter.
         //
-        // A value converter would also work for equality, but it makes EF apply
-        // the conversion to both sides of every comparison - so a LIKE pattern
-        // such as "%design%" gets fed to the Isbn converter and throws at
-        // parameter binding. Mapping the plain field leaves an ordinary text
-        // column that LIKE, ranges and indexes all treat normally, while the
-        // domain still exposes a validated Isbn. See Book.Isbn for the full note.
+        // Book.Isbn stores the primitive; the Isbn value object validates at
+        // construction. A converter here would make the column unusable for
+        // LIKE and ORDER BY, because EF applies the conversion to both sides of
+        // a comparison. See Book.Isbn for the full reasoning.
+        //
+        // Isbn.Length is still the source of the column width, so the value
+        // object and the schema cannot disagree about how long an ISBN is.
         // ---------------------------------------------------------------
-        builder.Property<string>(Book.IsbnPropertyName)
-            .HasColumnName("Isbn")
+        builder.Property(b => b.Isbn)
             .HasMaxLength(Isbn.Length)
             .IsRequired();
-
-        // The Isbn property is a wrapper over that field, not a column of its own.
-        builder.Ignore(b => b.Isbn);
 
         // The catalogue's natural key. Unique because one ISBN is one title -
         // this index is what stops the same book being catalogued twice, and it
         // is what makes lookup-by-ISBN an index seek rather than a scan.
-        builder.HasIndex(Book.IsbnPropertyName)
+        builder.HasIndex(b => b.Isbn)
             .IsUnique()
             .HasDatabaseName("IX_Books_Isbn");
 

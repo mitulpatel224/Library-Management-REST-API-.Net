@@ -69,6 +69,10 @@ public class LibraryDbContext : DbContext
 
     public DbSet<Publisher> Publishers => Set<Publisher>();
 
+    public DbSet<Member> Members => Set<Member>();
+
+    public DbSet<MembershipType> MembershipTypes => Set<MembershipType>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
