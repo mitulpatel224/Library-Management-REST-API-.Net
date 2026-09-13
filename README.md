@@ -332,14 +332,20 @@ it would happily allow two active loans on one copy — the exact rule this syst
 exists to enforce.
 
 ```bash
-./tests/Library.UnitTests/bin/Release/net10.0/Library.UnitTests.exe
-./tests/Library.IntegrationTests/bin/Release/net10.0/Library.IntegrationTests.exe
+dotnet test --solution LibraryManagement.slnx -c Release
 ```
 
-> **Known issue:** `dotnet test` does not currently work. The .NET 10 SDK retired
-> the VSTest bridge, and xUnit v3 targets Microsoft.Testing.Platform instead;
-> the runner configuration is still being sorted out. The test executables run
-> directly and all 31 pass. Tracked as issue 1 in [`TASKS.md`](TASKS.md).
+> **Note the `--solution` flag.** Passing the solution positionally is rejected
+> by the new runner. Tests run on Microsoft.Testing.Platform, which xUnit v3
+> targets now that the .NET 10 SDK has retired the VSTest bridge; `global.json`
+> at the repository root is what selects it.
+
+A single suite can also be run directly, since MTP builds each test project as
+an executable:
+
+```bash
+./tests/Library.UnitTests/bin/Release/net10.0/Library.UnitTests.exe
+```
 
 ---
 

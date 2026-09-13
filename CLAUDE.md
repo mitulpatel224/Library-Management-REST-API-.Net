@@ -87,12 +87,20 @@ dotnet run --project src/Library.Api             # http://localhost:5112/swagger
 either fix the code or, if the rule genuinely does not apply (e.g. generated
 code), scope the exclusion narrowly in `.editorconfig` and say why.
 
-Tests currently run as executables, because the .NET 10 SDK retired the VSTest
-bridge that xUnit v3 does not use:
+Tests:
+
+```powershell
+dotnet test --solution LibraryManagement.slnx -c Release
+```
+
+`--solution` is required — passing the solution positionally is rejected by the
+new runner. It works because `global.json` selects Microsoft.Testing.Platform,
+which is what xUnit v3 targets now that the .NET 10 SDK has retired the VSTest
+bridge. A single suite can also be run directly, since MTP builds each test
+project as an executable:
 
 ```powershell
 ./tests/Library.UnitTests/bin/Release/net10.0/Library.UnitTests.exe
-./tests/Library.IntegrationTests/bin/Release/net10.0/Library.IntegrationTests.exe
 ```
 
 Migrations run against Infrastructure alone, via `DesignTimeDbContextFactory`:

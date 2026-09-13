@@ -108,20 +108,33 @@ curl "http://localhost:5112/api/books/9999"
 
 ```bash
 dotnet build LibraryManagement.slnx -c Release
-
-./tests/Library.UnitTests/bin/Release/net10.0/Library.UnitTests.exe
-./tests/Library.IntegrationTests/bin/Release/net10.0/Library.IntegrationTests.exe
+dotnet test  --solution LibraryManagement.slnx -c Release
 ```
 
 Expected: 26 unit tests and 5 integration tests, all passing.
 
-> **Known issue.** `dotnet test` currently fails with *"Testing with VSTest target
-> is no longer supported by Microsoft.Testing.Platform on .NET 10 SDK and later"*.
-> The .NET 10 SDK retired the VSTest bridge; xUnit v3 targets Microsoft.Testing
-> Platform instead, and the runner configuration is not yet resolved. Because
-> xUnit v3 builds each test project as an executable, running them directly works
-> and is the documented workaround. Tracked as issue 1 in
-> [`../TASKS.md`](../TASKS.md), and it blocks the CI workflow.
+**Two things that will bite otherwise:**
+
+- **`--solution` is required.** `dotnet test LibraryManagement.slnx` fails with
+  *"Specifying a solution for 'dotnet test' should be via '--solution'"*.
+- **`global.json` selects the runner.** The .NET 10 SDK retired the VSTest
+  bridge and xUnit v3 targets Microsoft.Testing.Platform instead:
+
+  ```json
+  { "test": { "runner": "Microsoft.Testing.Platform" } }
+  ```
+
+  Without it, `dotnet test` fails with *"Testing with VSTest target is no longer
+  supported…"*. A `dotnet.config` `[dotnet.test.runner]` section and the
+  `TestingPlatformDotnetTestSupport` MSBuild property both look like they should
+  work and do not — `global.json` is the mechanism.
+
+Under MTP each test project also builds as an executable hosting its own runner,
+so a single suite can be run directly for a fast loop:
+
+```bash
+./tests/Library.UnitTests/bin/Release/net10.0/Library.UnitTests.exe
+```
 
 ---
 

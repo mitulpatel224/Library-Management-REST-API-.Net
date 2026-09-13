@@ -314,19 +314,40 @@ one parsed as a dictionary.
 
 **Lesson:** explanations belong in documentation, not in JSON keys.
 
-### `dotnet test` does not work on .NET 10 with xUnit v3
+### `dotnet test` on .NET 10 with xUnit v3 — *resolved*
 
 ```
 Testing with VSTest target is no longer supported by
 Microsoft.Testing.Platform on .NET 10 SDK and later.
 ```
 
-The .NET 10 SDK retired the VSTest bridge. xUnit v3 targets Microsoft.Testing
-Platform instead. Neither `dotnet.config` `[dotnet.test.runner]` nor
-`TestingPlatformDotnetTestSupport=true` resolved it.
+The .NET 10 SDK retired the VSTest bridge; xUnit v3 targets Microsoft.Testing
+Platform (MTP) instead, and something has to tell `dotnet test` which runner to
+use.
 
-**Workaround:** xUnit v3 builds test projects as executables, so they run
-directly. Unresolved — issue 1 in `TASKS.md`, and it blocks CI.
+**Two plausible-looking mechanisms that do not work.** A `dotnet.config` with a
+`[dotnet.test.runner]` section, and the `TestingPlatformDotnetTestSupport=true`
+MSBuild property. Both are documented in adjacent contexts, both appear to apply,
+and neither changes the outcome — the SDK still routes through VSTest and fails.
+
+**What actually works** is `global.json` at the repository root:
+
+```json
+{ "test": { "runner": "Microsoft.Testing.Platform" } }
+```
+
+plus `--solution` on the command line, which is now required:
+
+```bash
+dotnet test --solution LibraryManagement.slnx -c Release   # 31 passing
+```
+
+Passing the solution positionally is rejected: *"Specifying a solution for
+'dotnet test' should be via '--solution'"*.
+
+**Lesson:** when three mechanisms look equivalent, the one that works is a fact
+to be established by running it, not inferred from documentation. This blocked
+CI for two phases on the assumption that it was unresolvable.
 
 ### The `.NET 10` template no longer ships Swashbuckle
 

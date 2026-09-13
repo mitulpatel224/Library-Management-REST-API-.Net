@@ -33,9 +33,10 @@ done.
 - [x] Integration test foundation — `LibraryApiFactory`, smoke tests (5 tests)
 - [x] `CLAUDE.md`
 - [x] `TASKS.md`
-- [x] `.claude/skills/` — 4 skills
+- [x] `.claude/skills/` — 8 skills (4 foundational, plus `csharp-standards-1rivet`,
+      `xunit-testing`, `request-validation`, `domain-modelling`)
 - [x] `.claude/commands/` — 4 slash commands
-- [ ] `.github/workflows/ci.yml` — blocked on the `dotnet test` runner issue
+- [ ] `.github/workflows/ci.yml` — now unblocked: `dotnet test` works
 - [ ] Graphify + Archify installed, first diagrams generated
 - [x] `docs/phases/phase-01.md`
 
@@ -77,6 +78,31 @@ done.
 - [ ] `docs/api-contract.md` — **stale**: still lists the write endpoints as
       "planned", and does not cover the strict-JSON 400 or the editable barcode
 - [ ] `docs/phases/phase-02.md` — extend for the write side
+
+## Coding-standards compliance (1Rivet TEC-STD-005)
+
+Gaps found when mapping the standard onto the codebase on 2026-09-13. Each was
+verified against the current code, not assumed. Full rule-by-rule mapping lives
+in the `csharp-standards-1rivet` skill.
+
+- [ ] `DateTime.UtcNow` in `BookRequestValidators.cs:69,116,148` — breaks project
+      rule 6 and makes the three "date not in the future" rules untestable.
+      Inject `IClock` into the validators (the filter resolves them from DI)
+- [ ] Empty `catch (UnauthorizedAccessException) { }` in `LibraryApiFactory.cs` —
+      §7.4 forbids an empty catch; the `IOException` arm beside it is commented
+- [ ] Brace-less `if` guards in `Entity.cs:41,42,46,50` — §6.1 requires braces
+- [ ] `Book.Create` (9 params) and `Book.UpdateDetails` (8) exceed the §7.6 limit
+      of 5. Introduce a `BookDetails` parameter record — also removes the
+      argument-order hazard of eight consecutive nullables
+- [ ] Max-length literals (`500`, `50`, `4000`) duplicated between the validators
+      and the EF configurations, with nothing enforcing agreement. Hoist to shared
+      constants
+- [ ] `"^[A-Za-z0-9\\-_]+$"` in `BookRequestValidators.cs` should be a verbatim
+      `@"..."` literal — §7.2
+- [ ] No `<Version>` in `Directory.Build.props`, so every assembly ships as
+      `1.0.0.0`
+- [ ] Decide whether `file_header_template` + `IDE0073` (copyright headers) are
+      required for this deliverable, or whether the recorded deviation stands
 
 ## Phase 3 — Reader / Member APIs
 
@@ -171,10 +197,9 @@ done.
 
 | # | Item | Detail |
 |---|---|---|
-| 1 | `dotnet test` does not run | .NET 10 SDK retired the VSTest bridge; xUnit v3 targets Microsoft.Testing.Platform. Neither `dotnet.config` `[dotnet.test.runner]` nor `TestingPlatformDotnetTestSupport=true` resolved it. Test executables run directly and all 31 pass. **Blocks CI.** |
-| 2 | SQL Server migrations not generated | Only the SQLite migration set exists. Needs SQL Server Express installed, then scaffold with `LIBRARY_DB_PROVIDER=SqlServer`. |
-| 3 | Graphify / Archify not installed | Graphify needs Python 3.10+ (absent). Archify needs Node ≥ 22.19 (machine has 22.16). |
-| 4 | Category cycle detection | `Category.MoveUnder` blocks direct self-parenting only. A longer cycle (A→B→A) needs an ancestor walk in the service layer. |
+| 1 | SQL Server migrations not generated | Only the SQLite migration set exists. Needs SQL Server Express installed, then scaffold with `LIBRARY_DB_PROVIDER=SqlServer`. |
+| 2 | Graphify / Archify not installed | Graphify needs Python 3.10+ (absent). Archify needs Node ≥ 22.19 (machine has 22.16). |
+| 3 | Category cycle detection | `Category.MoveUnder` blocks direct self-parenting only. A longer cycle (A→B→A) needs an ancestor walk in the service layer. |
 
 ---
 
@@ -202,3 +227,13 @@ done.
 | 2026-09-12 | Barcode editable via the normal copy update | A damaged or unreadable label needs re-issuing, and delete-and-recreate would discard the copy's loan history. Uniqueness is checked excluding the row being edited, so an unchanged barcode does not self-conflict. | Immutable barcode; a dedicated /relabel endpoint |
 | 2026-09-12 | `IUnitOfWork` over per-repository `SaveChanges` | Lets one use case span several mutations in a single transaction, and gives one place to translate a unique-index violation into a 409. Matches on provider ERROR NUMBERS, not message text, because messages are localised. | Committing inside each repository method |
 | 2026-09-12 | `DesignTimeDbContextFactory` | Keeps `Microsoft.EntityFrameworkCore.Design` out of the API project — it is build tooling, not a hosting concern | Referencing Design from `Library.Api` |
+| 2026-09-13 | Adopt TEC-STD-005 with a documented deviation register | The standard is from 2019 and targets .NET Framework. Mapping every rule to enforced / adapted / deviated / obsolete keeps compliance auditable and gives a reviewer a prepared answer instead of an argument | Silent partial compliance, or transcribing the standard without reconciling it |
+| 2026-09-13 | Spaces, not tabs (§4.2) | `.editorconfig` already sets `indent_style = space`, `indent_size = 4`; `dotnet format` and the Roslyn defaults assume spaces, and spaces render identically everywhere. The standard's real goal — consistent 4-column indentation — is met | Tabs, as the standard literally specifies |
+| 2026-09-13 | No `#region` blocks (§6.1) | Regions hide code from the reader while leaving it in the file, and collapse by default in most editors — which is how dead code survives review. The classes here are small enough not to need navigation aids | `#region` around interface implementations |
+| 2026-09-13 | Keep the custom `DomainException` hierarchy (§7.4) | The error contract needs a stable machine-readable `ErrorCode` and one clean 4xx/5xx split. A built-in exception carries only prose, and mapping `InvalidOperationException` to 409 would report a genuine framework bug to the client as a business-rule failure | Built-in exception types, with or without a side-channel error code |
+| 2026-09-13 | No `[Serializable]` / deserialization constructor on exceptions (§7.4) | `SerializationInfo`-based exception serialization is obsolete as of .NET 8 (SYSLIB0051) and `BinaryFormatter` is removed; with `TreatWarningsAsErrors` the pattern fails the build. Exceptions never cross a process boundary here — they become ProblemDetails JSON | Implementing the standard's full Exception Constructor Pattern |
+| 2026-09-13 | Guard clauses over single-exit (§7.11) | The standard's own example trades three early returns for a mutable `isValid` local and deeper nesting. Single-exit is a C-era rule about resource cleanup, which `using`, `finally`, and the GC removed | One return per method |
+| 2026-09-13 | Abstract base classes for `Entity` / `DomainException` (§7.7) | They carry state and behaviour — id, equality contract, domain-event list — which an interface cannot. Contracts *are* interfaces here (`IClock`, `IBookRepository`, `IUnitOfWork`, `IHasDomainEvents`) | Interfaces only, as the standard prefers |
+| 2026-09-13 | Error messages inline, not in resources (§7.2) | `InvariantGlobalization` is on and the app is single-locale; the stable contract is `ErrorCode`, not the prose. Resources would add indirection with no reader today | `.resx` resource files for all message strings |
+| 2026-09-13 | No per-file copyright header (§6.2) | Internal assessment repository with one licence at the root; `file_header_template = unset`. For client work, set the template and enable `IDE0073` so the header is generated and verified rather than copy-pasted | Hand-written copyright block in every file |
+| 2026-09-13 | `global.json` selects Microsoft.Testing.Platform | The .NET 10 SDK retired the VSTest bridge that xUnit v3 does not use. `global.json` is the mechanism that works; a `dotnet.config` `[dotnet.test.runner]` section and `TestingPlatformDotnetTestSupport=true` both look equivalent and do nothing. `dotnet test` now runs 31 tests, unblocking CI. `dotnet.config` removed as dead config. | Continuing to run the test executables directly |
