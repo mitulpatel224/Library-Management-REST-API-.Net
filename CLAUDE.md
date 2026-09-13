@@ -128,12 +128,12 @@ dotnet ef migrations add <Name> --project src/Library.Infrastructure --context L
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Boilerplate, git, Claude setup | Done |
-| 2 | Book APIs | Read side done; writes pending |
-| 3 | Reader / Member APIs | Not started |
-| 4 | Lending APIs (Loan + Fine) | Not started |
-| 5 | Authentication & authorization | Not started |
-| 6 | Import books | Not started |
-| 7 | Reports & export | Not started |
+| 2 | Book APIs | Reads and writes done; lookup endpoints, tests and phase doc outstanding |
+| 3 | Reader / Member APIs | Done |
+| 4 | Lending APIs (Loan + Fine) | Done |
+| 5 | Authentication & authorization | **Deferred** — 6 and 7 come first |
+| 6 | Import books | Next |
+| 7 | Reports & export | After 6 |
 | 8 | Security & vulnerability hardening | Not started |
 | 9 | Reservations | Stretch |
 | 10 | CQRS refactor | Stretch |

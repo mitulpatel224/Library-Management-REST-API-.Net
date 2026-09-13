@@ -398,12 +398,12 @@ an executable:
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Boilerplate, git, tooling | ✅ Done |
-| 2 | Book APIs | 🔨 Read side done; writes in progress |
-| 3 | Reader / Member APIs | ✅ Endpoints done; member tests outstanding |
+| 2 | Book APIs | 🔨 Reads and writes done; lookups, tests and phase doc outstanding |
+| 3 | Reader / Member APIs | ✅ Done |
 | 4 | Lending APIs — loans, overdue, fines | ✅ Done |
-| 5 | Authentication & authorization | ⬜ |
-| 6 | Import books from CSV/JSON | ⬜ |
-| 7 | Reports & CSV export | ⬜ |
+| 5 | Authentication & authorization | ⏸️ Deferred — 6 and 7 first |
+| 6 | Import books from CSV/JSON | ⬜ Next |
+| 7 | Reports & CSV export | ⬜ After 6 |
 | 8 | Security & vulnerability hardening | ⬜ |
 | 9 | Reservations | ⬜ Stretch |
 | 10 | CQRS refactor | ⬜ Stretch |

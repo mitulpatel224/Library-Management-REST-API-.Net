@@ -11,6 +11,28 @@ done.
 
 ---
 
+## Where this stands — 2026-09-14
+
+| | |
+|---|---|
+| Phases complete | 1, 3, 4 · Phase 2 write side shipped, lookups and tests outstanding |
+| Next | 6 (import), then 7 (reports & export). **Phase 5 (auth) deliberately deferred** |
+| Endpoints | 33 controller actions (books, copies, members, membership types, loans, fines) + 2 health probes |
+| Tests | 142 unit + 5 integration, all passing |
+| Build | Release, 0 warnings (warnings are errors) |
+| Branch | `main`, in sync with `origin/main` at `03fd4c6` |
+
+**Phases 6 and 7 do not depend on Phase 5.** Import and export are both streamed
+endpoints over data that already exists. The only consequence of deferring auth is
+that both ship unauthenticated, which Phase 8 revisits regardless.
+
+**CI has been triggered for the first time** by the push of `03fd4c6` — the
+workflow was added in `2b17b99` and had never run before that. Its result is
+unverified from this machine (`gh` is not installed); check
+[Actions](https://github.com/mitulpatel224/Library-Management-REST-API-.Net/actions).
+
+---
+
 ## Phase 1 — Boilerplate, Git, and Claude setup
 
 - [x] Git repository initialised, `main` branch
@@ -112,9 +134,10 @@ in the `csharp-standards-1rivet` skill.
 - [x] Uniqueness validated in app *and* enforced by index
 - [x] `GET /api/membership-types`, `/{id}`, `POST` — types surface
 - [x] `docs/phases/phase-03.md`
-- [ ] `GET /api/members/{id}/loans` — **moved to Phase 4**: there is no `Loan`
-      entity yet, so the endpoint has nothing to return
-- [ ] **Tests for members** — none written. See issue 4 below
+- [x] `GET /api/members/{id}/loans` — deferred to Phase 4 and **delivered there**,
+      once a `Loan` entity existed for it to return. `/balance` added alongside it
+- [x] **Tests for members** — delivered in Phase 4 (`MemberTests`,
+      `ValueObjectTests`). Closed issue 4
 
 ## Phase 4 — Lending APIs (Loan + Fine)
 
@@ -192,10 +215,11 @@ in the `csharp-standards-1rivet` skill.
 - [x] `docs/data-flow.md` — sequence diagrams
 - [x] `docs/setup.md`
 - [x] `docs/database.md`
-- [~] `docs/api-contract.md` — books read side and all member endpoints
-      documented with real captured responses; book write side still stale
+- [~] `docs/api-contract.md` — books read side, all member endpoints, and all
+      loan/fine endpoints documented with real captured responses; **book write
+      side still stale**
 - [ ] `docs/security.md`
-- [~] `docs/phases/` — 01, 02 and 03 written; 04-08 pending
+- [~] `docs/phases/` — 01–04 written; 05–08 pending
 
 ## Stretch
 
