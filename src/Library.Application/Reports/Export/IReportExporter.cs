@@ -42,13 +42,22 @@ public interface IReportExporter
     /// Writes <paramref name="rows"/> to <paramref name="destination"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Must not dispose <paramref name="destination"/> — it is the response body,
     /// and the framework owns its lifetime. Must not enumerate
     /// <paramref name="rows"/> more than once; it is a live database read.
+    /// </para>
+    /// <para>
+    /// <paramref name="headers"/> overrides <c>T.GetHeaders()</c>, for the one
+    /// report whose columns depend on the request rather than only on the row
+    /// type. It is still resolved before any row is read, so an empty report
+    /// keeps its header line.
+    /// </para>
     /// </remarks>
     Task WriteAsync<T>(
         Stream destination,
         IAsyncEnumerable<T> rows,
+        IReadOnlyList<string>? headers = null,
         CancellationToken cancellationToken = default)
         where T : IExportableRow;
 }
@@ -76,7 +85,12 @@ public interface IExportableRow
     static abstract IReadOnlyList<string> GetHeaders();
 
     /// <summary>This row's values, in the same order as the headers.</summary>
-    IReadOnlyList<string?> GetValues();
+    /// <remarks>
+    /// Returns <see cref="ExportValue"/> rather than <c>string?</c> so a row can
+    /// mark an identifier column as text. An ordinary string converts implicitly,
+    /// so only the columns that need the distinction mention it.
+    /// </remarks>
+    IReadOnlyList<ExportValue> GetValues();
 }
 
 /// <summary>Selects the exporter registered for a format.</summary>

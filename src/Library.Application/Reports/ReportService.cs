@@ -22,6 +22,12 @@ public interface IReportService
         LoanReportRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Streams the membership report to <paramref name="destination"/>.</summary>
+    Task<ExportDescriptor> ExportMembersAsync(
+        Stream destination,
+        MemberReportRequest request,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Streams the overdue report to <paramref name="destination"/>.</summary>
     Task<ExportDescriptor> ExportOverdueAsync(
         Stream destination,
@@ -88,9 +94,31 @@ public sealed class ReportService : IReportService
         await exporter.WriteAsync(
             destination,
             _repository.StreamBooksAsync(request, cancellationToken),
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return Describe("books", exporter);
+    }
+
+    public async Task<ExportDescriptor> ExportMembersAsync(
+        Stream destination,
+        MemberReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IReportExporter exporter = _exporters.GetExporter(request.Format);
+
+        // The only export whose columns depend on the request, so the headers are
+        // passed explicitly rather than taken from the row type. Resolved here,
+        // before a single row is read - the exporter still writes a header line
+        // for an empty membership.
+        await exporter.WriteAsync(
+            destination,
+            _repository.StreamMembersAsync(request, cancellationToken),
+            request.Columns.Headers(),
+            cancellationToken);
+
+        return Describe("members", exporter);
     }
 
     public async Task<ExportDescriptor> ExportLoansAsync(
@@ -107,7 +135,7 @@ public sealed class ReportService : IReportService
         await exporter.WriteAsync(
             destination,
             _repository.StreamLoansAsync(request, _clock.UtcNow, cancellationToken),
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return Describe("loans", exporter);
     }
@@ -133,7 +161,7 @@ public sealed class ReportService : IReportService
         await exporter.WriteAsync(
             destination,
             _repository.StreamOverdueAsync(asOf, _fineRate(), cancellationToken),
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return Describe("overdue", exporter);
     }

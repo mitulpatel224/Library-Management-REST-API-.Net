@@ -17,8 +17,8 @@ done.
 |---|---|
 | Phases complete | 1, 3, 4, 6, 7 · Phase 2 write side shipped, lookups and tests outstanding |
 | Next | 5 (auth) or 8 (security hardening) |
-| Endpoints | 39 controller actions + 2 health probes |
-| Tests | 186 cases / 131 methods, all passing. **Domain well covered; no endpoint, service or repository has a test** — see README "Testing" |
+| Endpoints | 40 controller actions + 2 health probes |
+| Tests | 197 cases / 140 methods, all passing. **Domain well covered; no endpoint, service or repository has a test** — see README "Testing" |
 | Build | Release, 0 warnings (warnings are errors) |
 | Branch | `main` |
 
@@ -190,12 +190,15 @@ in the `csharp-standards-1rivet` skill.
 ## Phase 7 — Reports & Export
 
 - [x] `GET /api/reports/books/export?format=csv|json` — streamed
+- [x] `GET /api/reports/members/export` — roll, with `includeBookCounts`,
+      `includeActiveLoans`, `includeFines`
 - [x] `GET /api/reports/loans?from=&to=&status=&memberId=`
 - [x] `GET /api/reports/overdue?asOf=` — with projected fines
 - [x] `GET /api/reports/fines/summary` — SQL aggregates + monthly breakdown
 - [x] CSV formula-injection escaping (`=`, `+`, `-`, `@`, and leading tab/CR)
+- [x] Identifier columns forced to text — ISBN no longer exports as `9.78E+12`
 - [x] Aggregates computed in SQL, not in memory
-- [x] CSV encoder tests (21) — the security tests for this phase
+- [x] CSV encoder tests (32 cases / 21 methods) — the security tests for this phase
 - [ ] Integration test for the export endpoints
 - [x] `docs/phases/phase-07.md`
 
@@ -221,7 +224,7 @@ in the `csharp-standards-1rivet` skill.
 - [x] `docs/data-flow.md` — sequence diagrams
 - [x] `docs/setup.md`
 - [x] `docs/database.md`
-- [x] `docs/api-contract.md` — all 39 endpoints, including book writes, strict
+- [x] `docs/api-contract.md` — all 40 endpoints, including book writes, strict
       JSON, import and reports
 - [ ] `docs/security.md`
 - [~] `docs/phases/` — 01, 02, 03, 04, 06, 07 written. 05 deferred with the
@@ -250,6 +253,7 @@ in the `csharp-standards-1rivet` skill.
 | 10 | Unpaid fines do not block borrowing | `Member.CanBorrow` is still `Status == Active`. `GET /api/members/{id}/balance` reports the debt but nothing acts on it. Whether an outstanding fine should stop a loan is a policy decision, deliberately not invented. |
 | 11 | No partial fine payment | `POST /api/fines/{id}/pay` settles in full. Part payment needs an amount-paid column, an overpayment rule, and a decision about whether a partly-paid fine still blocks borrowing. |
 | 12 | Failed fine assessment is logged, not retried | Domain event handlers run after the commit and their failures are isolated by design — but a fine that fails to write needs someone to read the log. No retry or outbox. |
+| 13 | Text-forcing apostrophe verified in the file, not in a spreadsheet | The export now writes `'9780132350884`, confirmed by reading the bytes. How that renders is the spreadsheet's business: Excel consumes the apostrophe and formats the cell as text, LibreOffice has historically shown it literally in some versions. Either way the full ISBN is readable, which was the reported defect — but "Excel shows no apostrophe" is **not** something this machine can verify (no Excel here). Worth one manual check on a real install before treating it as settled. |
 
 ---
 
@@ -322,3 +326,9 @@ in the `csharp-standards-1rivet` skill.
 | 2026-09-14 | CSV written as UTF-8 **with** a BOM | Excel on Windows opens a BOM-less CSV as the system ANSI code page, so "José" arrives mangled. The BOM is what marks it UTF-8. The trade is that strict parsers may surface it on the first header — and these files are opened in a spreadsheet far more often than parsed by a script. | BOM-less UTF-8 |
 | 2026-09-14 | `FineCurrencyResolver` as a second delegate | The fine handler needs the rate and not the currency; the fine report needs the currency and not the rate. Two narrow dependencies state what each caller uses. It exists at all because `Library.Application` has no configuration reference, so Infrastructure binds the options and supplies both. | Widening `FineRateResolver` to return a pair |
 | 2026-09-14 | Ship with no endpoint, service or repository tests — documented, not hidden | A deliberate trade for an assessment deliverable: breadth of working features over depth of automated verification. The domain layer, validators, import readers and the CSV injection encoder are well covered; every endpoint behaviour was verified by hand. The risk is named in the README rather than left for a reviewer to discover, and three specific behaviours are called out as able to regress silently. Revisit before this is anything other than an assessment. | Building the integration suite now, at the cost of Phases 5 and 8 |
+| 2026-09-14 | Identifier columns declared as text by the **row**, not detected by the encoder | Every exported ISBN opened in Excel as `9.78E+12`: a CSV carries no types, so the spreadsheet infers one per cell, and 13 digits is a number. By the time a value reaches `CsvFieldEncoder` it is a string, and `9780132350884` and `212` are equally strings — so the row declares which columns are identifiers (`ExportValue.Text`) and the encoder acts on the declaration. Applied to `isbn`, `barcode`, `membershipNumber` and phone numbers. | Quoting the field (does nothing — Excel discards RFC 4180 quotes before inferring a type), or having the encoder guess from length (a rule that silently breaks the first time a genuine number crosses the threshold) |
+| 2026-09-14 | The text prefix is applied only when the value is all digits | A barcode reads `LIB-001000`; no spreadsheet would take it for a number, so prefixing it adds a visible apostrophe and fixes nothing. The column is still *declared* text, because that is a fact about the column rather than about today's format — if barcodes ever become numeric it works with no code change. | Prefixing every declared-text cell (visible noise on columns that were never at risk) |
+| 2026-09-14 | Export → import round trip preserved by `Isbn.Normalize`, and pinned by a test | The books export is meant to be edited in a spreadsheet and imported straight back, so the apostrophe would be a real regression if it survived. `Normalize` keeps only ASCII digits and discards everything else. Verified by a test rather than assumed. | Exporting the hyphenated display form (loses the round trip's exact-match property), or skipping the prefix on the books report only (leaves the original defect in the report most likely to be opened in Excel) |
+| 2026-09-14 | `GET /api/reports/members/export` columns depend on the request | Three flags (`includeBookCounts`, `includeActiveLoans`, `includeFines`) add columns, all off by default, so the plain export is the membership roll and nothing more. The risk is silent: a header line listing 11 columns against rows emitting 10 shifts every later value one place left, and the file still parses. Both lists are therefore generated from one `MemberExportColumns` value that travels on the row. `IReportExporter.WriteAsync` gained an optional `headers` parameter, resolved before the first row is read so an empty report keeps its header. | Always emitting every aggregate column (wider than most callers want, and a column of zeros when the data was never requested is misleading), or a second row type per combination (eight types) |
+| 2026-09-14 | Member aggregates computed in SQL on every members export, regardless of the flags | `Member` has no `Loans`/`Fines` navigation, so these are correlated subqueries with no N+1 available; both land on indexes that already exist (`IX_Loans_MemberId_ReturnedAt`, `IX_Fines_MemberId_PaidAt_WaivedAt`). Making each one conditional means either eight hand-written projections or a `CASE WHEN @flag` the provider may evaluate anyway — complexity and a second query shape, to avoid work the indexes already make cheap. The flags shape the file, not the plan. Would be revisited for a very large membership exported often with no aggregates wanted; the fix then is one extra shape, not eight. | Conditional projections per flag combination, or loading members and counting in C# (the N+1 this exists to avoid) |
+| 2026-09-14 | `includeFines` adds two columns, not one | `totalFines` is lifetime assessed; `outstandingFines` excludes what was paid or waived. "Has this member been fined before?" and "does this member owe us money?" are different questions and only the second is actionable. Verified: paying the 800.00 fine left `totalFines` at 800.00 and dropped `outstandingFines` to 0.00. | One column (either choice loses a question the report should answer) |

@@ -51,6 +51,7 @@ public sealed class CsvReportExporter : IReportExporter
     public async Task WriteAsync<T>(
         Stream destination,
         IAsyncEnumerable<T> rows,
+        IReadOnlyList<string>? headers = null,
         CancellationToken cancellationToken = default)
         where T : IExportableRow
     {
@@ -61,15 +62,17 @@ public sealed class CsvReportExporter : IReportExporter
         // owns its lifetime. Disposing it here truncates the response.
         await using var writer = new StreamWriter(destination, Utf8WithBom, leaveOpen: true);
 
-        // Headers come from the row TYPE, not an instance - so an empty report
-        // still produces a valid file with its header, which is what a consumer
-        // parsing it expects.
+        // Headers come from the row TYPE, or from the caller for a report whose
+        // columns depend on the request - never from a row. That is what lets an
+        // empty report still produce a valid file with its header, which is what
+        // a consumer parsing it expects.
         await writer.WriteLineAsync(
-            string.Join(',', T.GetHeaders().Select(_encoder.Encode))).ConfigureAwait(false);
+            string.Join(',', (headers ?? T.GetHeaders()).Select(h => _encoder.Encode(h))))
+            .ConfigureAwait(false);
 
         await foreach (T row in rows.WithCancellation(cancellationToken))
         {
-            string line = string.Join(',', row.GetValues().Select(_encoder.Encode));
+            string line = string.Join(',', row.GetValues().Select(v => _encoder.Encode(v)));
 
             // WriteLineAsync with the token, so an abandoned download stops
             // writing rather than running the query to completion for a client
@@ -109,6 +112,7 @@ public sealed class JsonReportExporter : IReportExporter
     public async Task WriteAsync<T>(
         Stream destination,
         IAsyncEnumerable<T> rows,
+        IReadOnlyList<string>? headers = null,
         CancellationToken cancellationToken = default)
         where T : IExportableRow
     {
@@ -118,19 +122,24 @@ public sealed class JsonReportExporter : IReportExporter
         await using var writer = new Utf8JsonWriter(
             destination, new JsonWriterOptions { Indented = false, SkipValidation = false });
 
-        IReadOnlyList<string> headers = T.GetHeaders();
+        // The property NAMES of every object in the array, so a variable column
+        // set changes the JSON shape exactly as it changes the CSV columns.
+        IReadOnlyList<string> names = headers ?? T.GetHeaders();
 
         writer.WriteStartArray();
 
         await foreach (T row in rows.WithCancellation(cancellationToken))
         {
-            IReadOnlyList<string?> values = row.GetValues();
+            IReadOnlyList<ExportValue> values = row.GetValues();
 
             writer.WriteStartObject();
 
-            for (int i = 0; i < headers.Count && i < values.Count; i++)
+            for (int i = 0; i < names.Count && i < values.Count; i++)
             {
-                writer.WriteString(headers[i], values[i] ?? string.Empty);
+                // Every value is written as a JSON string, so the "is this cell a
+                // number?" ambiguity that ExportValue.IsText exists to settle
+                // never arises here. The declaration is correctly ignored.
+                writer.WriteString(names[i], values[i].Value ?? string.Empty);
             }
 
             writer.WriteEndObject();

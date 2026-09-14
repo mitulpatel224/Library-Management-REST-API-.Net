@@ -1,4 +1,5 @@
 using Library.Application.Reports.Export;
+using Library.Domain.ValueObjects;
 
 namespace Library.UnitTests.Application;
 
@@ -152,5 +153,94 @@ public sealed class CsvFieldEncoderTests
     public void Null_and_empty_both_encode_to_an_empty_field(string? value)
     {
         _encoder.Encode(value).ShouldBe(string.Empty);
+    }
+
+    // -----------------------------------------------------------------------
+    // Identifier columns: digits that are a name, not a quantity
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void An_isbn_in_a_text_column_is_forced_to_text()
+    {
+        // The reported defect: an exported ISBN opened in Excel showed 9.78E+12.
+        // Thirteen digits is a number to a spreadsheet, and a CSV carries no
+        // types to say otherwise.
+        _encoder.Encode(ExportValue.Text("9780132350884")).ShouldBe("'9780132350884");
+    }
+
+    [Fact]
+    public void The_same_isbn_in_an_ordinary_column_is_left_alone()
+    {
+        // The prefix is driven by the column's declaration, never guessed from
+        // the value. A row that does not say "this is text" gets no apostrophe.
+        _encoder.Encode("9780132350884").ShouldBe("9780132350884");
+    }
+
+    [Fact]
+    public void Quoting_would_not_have_fixed_it()
+    {
+        // Worth pinning, because quoting is the obvious wrong fix. Excel discards
+        // RFC 4180 quotes before inferring a type, so "9780132350884" is
+        // converted exactly as the bare digits are. The apostrophe is the only
+        // in-band signal a spreadsheet honours.
+        _encoder.Encode(ExportValue.Text("9780132350884")).ShouldNotBe("\"9780132350884\"");
+    }
+
+    [Fact]
+    public void Leading_zeros_survive_a_text_column()
+    {
+        // The quieter half of the same bug: number conversion eats leading zeros,
+        // and once the sheet is saved back they are gone for good.
+        _encoder.Encode(ExportValue.Text("000123")).ShouldBe("'000123");
+    }
+
+    [Theory]
+    [InlineData("LIB-001000")]
+    [InlineData("MEM-2026-00042")]
+    public void A_text_column_that_is_not_all_digits_is_not_prefixed(string value)
+    {
+        // Barcodes and membership numbers are declared as text because that is
+        // what they are, but no spreadsheet would read them as numbers, so
+        // prefixing them would add visible noise and fix nothing. The declaration
+        // is what future-proofs them if the format ever becomes numeric.
+        _encoder.Encode(ExportValue.Text(value)).ShouldBe(value);
+    }
+
+    [Fact]
+    public void A_text_column_starting_with_a_formula_trigger_is_still_disarmed()
+    {
+        // Declaring a column as text must not open a hole in the formula defence.
+        // This value is not all digits, so it takes the injection path instead.
+        _encoder.Encode(ExportValue.Text("=1+1")).ShouldBe("'=1+1");
+    }
+
+    [Fact]
+    public void A_phone_number_is_forced_to_text()
+    {
+        // The overdue and member reports exist to contact people. 9.88E+09 is a
+        // number nobody can dial.
+        _encoder.Encode(ExportValue.Text("9876543210")).ShouldBe("'9876543210");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void An_empty_text_column_stays_empty(string? value)
+    {
+        // No apostrophe on a blank cell - an optional phone number must not
+        // export as a lone quote mark.
+        _encoder.Encode(ExportValue.Text(value)).ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public void A_forced_isbn_still_reimports()
+    {
+        // The books export is meant to round-trip through POST /api/books/import.
+        // Isbn.Normalize keeps only ASCII digits, so the apostrophe is discarded
+        // on the way back in - the prefix is a display hint, not a data change.
+        string exported = _encoder.Encode(ExportValue.Text("9780132350884"));
+
+        Isbn.TryCreate(exported, out Isbn parsed, out string? error).ShouldBeTrue(error);
+        parsed.Value.ShouldBe("9780132350884");
     }
 }

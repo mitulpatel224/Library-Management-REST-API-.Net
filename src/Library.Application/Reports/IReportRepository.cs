@@ -37,6 +37,14 @@ public interface IReportRepository
         DateTimeOffset asOf,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Streams the membership roll, ordered by name, with loan and fine
+    /// aggregates computed in SQL.
+    /// </summary>
+    IAsyncEnumerable<MemberExportRow> StreamMembersAsync(
+        MemberReportRequest request,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Streams loans still out and past their due date at <c>asOf</c>.</summary>
     IAsyncEnumerable<OverdueExportRow> StreamOverdueAsync(
         DateTimeOffset asOf,

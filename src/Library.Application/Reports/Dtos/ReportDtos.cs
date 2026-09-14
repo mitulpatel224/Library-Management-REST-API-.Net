@@ -37,6 +37,16 @@ internal static class ExportFormatting
 
     public static string Number(int value) =>
         value.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// An identifier: digits in it are a name, not a quantity.
+    /// </summary>
+    /// <remarks>
+    /// Marks a column so the CSV encoder can stop a spreadsheet re-reading it as
+    /// a number — the defect that turned every exported ISBN into
+    /// <c>9.78E+12</c>. See <see cref="ExportValue"/>.
+    /// </remarks>
+    public static ExportValue Text(string? value) => ExportValue.Text(value);
 }
 
 /// <summary>One book, as exported by the catalogue report.</summary>
@@ -81,10 +91,15 @@ public sealed record BookExportRow : IExportableRow
         "totalCopies", "availableCopies",
     ];
 
-    public IReadOnlyList<string?> GetValues() =>
+    public IReadOnlyList<ExportValue> GetValues() =>
     [
         ExportFormatting.Number(Id),
-        Isbn,
+
+        // Text, not a number. Thirteen digits is a number to Excel, which shows
+        // it as 9.78E+12 - the ISBN is intact in the file and unreadable to the
+        // person who opened it.
+        ExportFormatting.Text(Isbn),
+
         Title,
         Subtitle,
         CategoryName,
@@ -171,13 +186,18 @@ public sealed record LoanExportRow : IExportableRow
         "fineAmount", "fineSettled",
     ];
 
-    public IReadOnlyList<string?> GetValues() =>
+    public IReadOnlyList<ExportValue> GetValues() =>
     [
         ExportFormatting.Number(Id),
-        Barcode,
-        Isbn,
+
+        // All three are identifiers. Only the ISBN is all digits today, so only
+        // it is actually altered - the other two are declared for what they are
+        // rather than for what they currently look like.
+        ExportFormatting.Text(Barcode),
+        ExportFormatting.Text(Isbn),
+
         Title,
-        MembershipNumber,
+        ExportFormatting.Text(MembershipNumber),
         MemberName,
         ExportFormatting.Instant(IssuedAt),
         ExportFormatting.Instant(DueAt),
@@ -238,19 +258,187 @@ public sealed record OverdueExportRow : IExportableRow
         "memberEmail", "memberPhone", "dueAt", "daysOverdue", "projectedFine",
     ];
 
-    public IReadOnlyList<string?> GetValues() =>
+    public IReadOnlyList<ExportValue> GetValues() =>
     [
         ExportFormatting.Number(LoanId),
-        Barcode,
+        ExportFormatting.Text(Barcode),
         Title,
-        MembershipNumber,
+        ExportFormatting.Text(MembershipNumber),
         MemberName,
         MemberEmail,
-        MemberPhone,
+
+        // A phone number is the clearest case of digits that are not a quantity:
+        // 9876543210 rendered as 9.88E+09 is a number nobody can dial, and this
+        // is the one report whose purpose is to contact people.
+        ExportFormatting.Text(MemberPhone),
         ExportFormatting.Instant(DueAt),
         ExportFormatting.Number(DaysOverdue),
         ExportFormatting.Money(ProjectedFine),
     ];
+}
+
+/// <summary>
+/// Which optional aggregate columns a members export carries.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why this type exists at all.</b> Headers are produced from the row
+/// <i>type</i> (<c>static abstract GetHeaders</c>), which is what lets an empty
+/// report still write a valid header line. Optional columns break that: the
+/// column set depends on the request, and a request is not a type.
+/// </para>
+/// <para>
+/// The danger in a variable column set is drift — headers listing ten columns
+/// while rows emit nine shifts every value one place left, and the file still
+/// parses, so nothing complains. Both lists are therefore generated from this
+/// one object: <see cref="Headers"/> here and
+/// <see cref="MemberExportRow.GetValues"/> read the same three flags in the same
+/// order. They cannot disagree without someone editing both.
+/// </para>
+/// </remarks>
+public readonly record struct MemberExportColumns
+{
+    /// <summary>Adds <c>booksBorrowed</c> — loans ever taken by this member.</summary>
+    public bool BookCounts { get; init; }
+
+    /// <summary>Adds <c>activeLoans</c> — copies the member is holding right now.</summary>
+    public bool ActiveLoans { get; init; }
+
+    /// <summary>Adds <c>totalFines</c> and <c>outstandingFines</c>.</summary>
+    public bool Fines { get; init; }
+
+    /// <summary>Base columns, then whichever aggregates were asked for.</summary>
+    public IReadOnlyList<string> Headers()
+    {
+        List<string> headers =
+        [
+            "memberId", "membershipNumber", "fullName", "email", "phone",
+            "membershipType", "status", "joinedOn",
+            "maxConcurrentLoans", "loanPeriodDays",
+        ];
+
+        if (BookCounts)
+        {
+            headers.Add("booksBorrowed");
+        }
+
+        if (ActiveLoans)
+        {
+            headers.Add("activeLoans");
+        }
+
+        if (Fines)
+        {
+            headers.Add("totalFines");
+            headers.Add("outstandingFines");
+        }
+
+        return headers;
+    }
+}
+
+/// <summary>One member, as exported by the membership report.</summary>
+/// <remarks>
+/// The aggregate properties are always populated — see
+/// <c>ReportRepository.StreamMembersAsync</c> for why the query does not vary.
+/// <see cref="Columns"/> decides which of them reach the file.
+/// </remarks>
+public sealed record MemberExportRow : IExportableRow
+{
+    public int Id { get; init; }
+
+    public string MembershipNumber { get; init; } = null!;
+
+    public string FullName { get; init; } = null!;
+
+    public string Email { get; init; } = null!;
+
+    public string? Phone { get; init; }
+
+    public string MembershipTypeName { get; init; } = null!;
+
+    public string Status { get; init; } = null!;
+
+    public DateOnly JoinedOn { get; init; }
+
+    public int MaxConcurrentLoans { get; init; }
+
+    public int LoanPeriodDays { get; init; }
+
+    /// <summary>Loans ever taken by this member, returned ones included.</summary>
+    public int BooksBorrowed { get; init; }
+
+    /// <summary>Copies the member is holding now — loans with no return date.</summary>
+    public int ActiveLoans { get; init; }
+
+    /// <summary>Every fine ever assessed against this member.</summary>
+    public decimal TotalFines { get; init; }
+
+    /// <summary>Assessed but neither paid nor waived — what this member still owes.</summary>
+    /// <remarks>
+    /// Carried alongside the lifetime total because they answer different
+    /// questions. "Has this member been fined before?" is a history question;
+    /// "does this member owe us money?" is the one a librarian acts on, and a
+    /// lifetime total cannot answer it.
+    /// </remarks>
+    public decimal OutstandingFines { get; init; }
+
+    /// <summary>Which optional columns this export carries.</summary>
+    public MemberExportColumns Columns { get; init; }
+
+    /// <summary>
+    /// The base columns only.
+    /// </summary>
+    /// <remarks>
+    /// Satisfies <see cref="IExportableRow"/>, which cannot express a
+    /// request-dependent column set. The exporter is given the real header list
+    /// explicitly — see <c>MemberExportColumns</c>.
+    /// </remarks>
+    public static IReadOnlyList<string> GetHeaders() => default(MemberExportColumns).Headers();
+
+    public IReadOnlyList<ExportValue> GetValues()
+    {
+        List<ExportValue> values =
+        [
+            ExportFormatting.Number(Id),
+
+            // An identifier, not a quantity. MEM-2026-00042 is safe as it stands,
+            // but the column is what it is regardless of today's format.
+            ExportFormatting.Text(MembershipNumber),
+
+            FullName,
+            Email,
+
+            // The case that bites: a ten-digit phone number read as a number
+            // becomes 9.88E+09, and this report exists to contact people.
+            ExportFormatting.Text(Phone),
+
+            MembershipTypeName,
+            Status,
+            ExportFormatting.Date(JoinedOn),
+            ExportFormatting.Number(MaxConcurrentLoans),
+            ExportFormatting.Number(LoanPeriodDays),
+        ];
+
+        // Same flags, same order as MemberExportColumns.Headers.
+        if (Columns.BookCounts)
+        {
+            values.Add(ExportFormatting.Number(BooksBorrowed));
+        }
+
+        if (Columns.ActiveLoans)
+        {
+            values.Add(ExportFormatting.Number(ActiveLoans));
+        }
+
+        if (Columns.Fines)
+        {
+            values.Add(ExportFormatting.Money(TotalFines));
+            values.Add(ExportFormatting.Money(OutstandingFines));
+        }
+
+        return values;
+    }
 }
 
 /// <summary>

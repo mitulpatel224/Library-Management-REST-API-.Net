@@ -8,11 +8,14 @@ the person who opens the file an attack.
 ## What we built
 
 - `GET /api/reports/books/export` — the catalogue, CSV or JSON
+- `GET /api/reports/members/export` — the membership roll, with optional
+  per-member loan and fine aggregates
 - `GET /api/reports/loans` — lending history, filtered by date, status, member
 - `GET /api/reports/overdue` — what is late now, with projected fines
 - `GET /api/reports/fines/summary` — aggregated totals, computed in SQL
-- `CsvFieldEncoder` — formula-injection defence, with 12 tests
+- `CsvFieldEncoder` — formula-injection defence and type preservation, 21 tests
 - `IReportExporter` with CSV and JSON implementations
+- `ExportValue` — lets a row declare a column as text rather than a number
 
 ---
 
@@ -86,7 +89,9 @@ rest. A test asserts it, so it is a decision rather than a surprise.
 
 A spreadsheet never opens JSON. Prefixing values with an apostrophe would corrupt
 the data for every legitimate consumer. **A defence applied where the threat does
-not exist is a bug**, not extra safety. Twelve tests pin both behaviours.
+not exist is a bug**, not extra safety. Tests pin both behaviours, and the same
+split applies to the ISBN fix below — one flag, acted on by CSV and ignored by
+JSON.
 
 ---
 
@@ -222,6 +227,105 @@ script, and mangled names are the worse failure.
 
 ---
 
+### 8. A report whose columns depend on the request
+
+The membership export is the one report that does not have a fixed shape. Three
+flags add columns:
+
+```
+GET /api/reports/members/export?includeBookCounts=true
+                              &includeActiveLoans=true
+                              &includeFines=true
+```
+
+That breaks an assumption the other four rely on. Headers come from the row
+**type**:
+
+```csharp
+static abstract IReadOnlyList<string> GetHeaders();
+```
+
+which is what lets an empty report still write a valid header line — there is no
+row to ask. A request-dependent column set has no type to hang off.
+
+**The failure mode to design against is silent.** If the header line lists eleven
+columns and the rows emit ten, every value after the gap shifts one place left.
+The file still parses. Nothing errors. A consumer reads `joinedOn` out of the
+`status` column and carries on.
+
+So both lists are generated from one object:
+
+```csharp
+public readonly record struct MemberExportColumns
+{
+    public bool BookCounts { get; init; }
+    public bool ActiveLoans { get; init; }
+    public bool Fines { get; init; }
+
+    public IReadOnlyList<string> Headers() { ... }
+}
+```
+
+`MemberExportColumns.Headers()` and `MemberExportRow.GetValues()` read the same
+three flags in the same order, and the flags travel on the row itself, set once
+from the request in the repository projection. They cannot disagree without
+someone editing both.
+
+`IReportExporter.WriteAsync` gained an optional `headers` parameter for this —
+resolved from the request *before* the first row is read, so the empty-report
+guarantee survives intact.
+
+**The cost, stated in the OpenAPI description:** a consumer parsing this file
+positionally must send the same flags every time. Reading by header name is the
+safer habit and costs nothing.
+
+---
+
+### 9. Four aggregates, one query shape
+
+`Member` has no `Loans` or `Fines` navigation property — deliberately, since a
+member's loan history is unbounded and nothing in the domain needs to walk it. So
+the aggregates are correlated subqueries:
+
+```csharp
+ActiveLoans = _context.Loans.Count(l => l.MemberId == m.Id && l.ReturnedAt == null),
+```
+
+with no collection to `Include` and no N+1 available to fall into. Both land on
+indexes that already exist for other reasons — `IX_Loans_MemberId_ReturnedAt`
+covers the loan counts, `IX_Fines_MemberId_PaidAt_WaivedAt` the fine totals.
+
+**The query does not vary with the requested columns, and that is a choice.**
+Making each aggregate conditional means either eight hand-written projections or
+a `CASE WHEN @flag` the provider may evaluate anyway — complexity and a second
+query shape to reason about, to avoid work the indexes above already make cheap.
+All four are computed; the request decides which reach the file. The flags shape
+the output, not the plan.
+
+The case that would overturn it: a very large membership, exported often, with no
+aggregates wanted. The fix then is to branch on *any* aggregate requested and skip
+all four — one extra shape rather than eight. Recorded here so the reasoning can
+be re-checked rather than rediscovered.
+
+**One SQL detail worth knowing.** `SUM` over zero rows is `NULL`, not `0`, and
+materialising that into a non-nullable `decimal` throws. Hence:
+
+```csharp
+.Sum(f => (decimal?)f.Amount) ?? 0m
+```
+
+A member who has never been fined is the common case, so this would have failed
+on almost every row.
+
+**Why two fine columns for one flag.** `totalFines` is lifetime assessed;
+`outstandingFines` excludes what has been paid or waived. They answer different
+questions — "has this member been fined before?" versus "does this member owe us
+money?" — and only the second is actionable. Paying the seeded 800.00 fine leaves
+`totalFines` at 800.00 and drops `outstandingFines` to 0.00, which is the whole
+point of carrying both.
+
+---
+
 ## Things that bit us
 
 ### `EF.Functions.DateDiffDay` is SQL Server only — and it failed *mid-stream*
@@ -270,6 +374,61 @@ After the fix the loans export returned all 5 rows instead of 1.
 
 **The lesson:** an `IQueryable` that compiles is not an `IQueryable` that
 translates, and the failure can arrive after the response has started.
+
+### Every exported ISBN read as `9.78E+12`
+
+Found by opening the catalogue export in Excel, which is the only place it is
+visible. The CSV was never wrong:
+
+```
+2,9780132350884,Clean Code,...
+```
+
+Thirteen digits, exactly as stored. But **a CSV carries no types**, so the
+spreadsheet infers one per cell from the characters alone — and thirteen digits
+is a number. Excel converted it, found it too wide for the column, and displayed
+`9.78E+12`. Every script parsing the file got the right answer; the librarian who
+opened the download could not read a single ISBN.
+
+Three things about this are worth keeping:
+
+**The obvious fix does not work.** Quoting the field — `"9780132350884"` — changes
+nothing. RFC 4180 quotes describe the *file's structure*, not a cell's type, and
+Excel discards them before inferring. The only in-band signal a spreadsheet
+honours is a leading apostrophe, which is the same mechanism already carrying the
+formula defence, now doing a second job.
+
+**The encoder cannot decide this on its own.** By the time a value reaches
+`CsvFieldEncoder` it is a string, and `9780132350884` and `212` are equally
+strings. Guessing from length — "twelve digits or more must be an identifier" —
+is a rule that works until a genuine total crosses the threshold and silently
+acquires an apostrophe. So the *row* declares the column instead:
+
+```csharp
+ExportFormatting.Text(Isbn),    // an identifier
+ExportFormatting.Number(Id),    // a quantity
+```
+
+`ExportValue` carries that flag, with an implicit conversion from `string` so
+only the exceptional columns say anything. The encoder then acts on the
+declaration, and only where it changes something: `LIB-001000` is declared text
+and left untouched, because no spreadsheet would read it as a number and an
+apostrophe there would be visible noise for no gain.
+
+**The round trip still works.** An exported catalogue is meant to import straight
+back, so the prefix would be a real regression if it survived the trip.
+`Isbn.Normalize` keeps only ASCII digits and discards everything else — the
+apostrophe included — which a test now pins rather than assumes.
+
+**JSON was never affected and still is not.** `Utf8JsonWriter.WriteString` emits
+every value as a JSON string, so the ambiguity does not exist there. Both
+exporters receive the same `IsText` flag and only one acts on it — the same
+reasoning that keeps the formula defence out of the JSON path: a defence applied
+where the threat does not exist is a bug.
+
+The same fix covers `memberPhone`, and that one matters more: a ten-digit number
+rendered as `9.88E+09` cannot be dialled, in the two reports whose entire purpose
+is contacting people.
 
 ### A test assertion that was too strict
 
@@ -323,6 +482,45 @@ rest.**
 | `from=2030&to=2000` | `422 report.invalid_date_range` |
 | `Content-Disposition` | `attachment; filename="overdue-2026-09-14.csv"` |
 
+### ISBN as text
+
+```bash
+curl "http://localhost:5112/api/reports/books/export" | head -2
+```
+
+```
+id,isbn,title,...
+15,'9780553380163,A Brief History of Time,...
+```
+
+| Check | Result |
+|---|---|
+| `isbn` in CSV | `'9780553380163` — reads as text, digits intact |
+| `id`, `pageCount`, `totalCopies` | `15`, `212`, `3` — untouched, still numbers |
+| Same row via `?format=Json` | `"isbn":"9780553380163"` — no apostrophe |
+| `barcode`, `membershipNumber` | `LIB-001040`, `MEM-2022-00003` — declared text, not prefixed |
+| `memberPhone` | `'+919988776655` |
+| Empty `phone` | empty cell, not a lone `'` |
+
+### Membership export
+
+```bash
+curl "http://localhost:5112/api/reports/members/export\
+?includeBookCounts=true&includeActiveLoans=true&includeFines=true"
+```
+
+| Check | Result |
+|---|---|
+| No flags | 10 columns, 9 members, ordered by name |
+| All three flags | 14 columns — `booksBorrowed`, `activeLoans`, `totalFines`, `outstandingFines` |
+| `includeActiveLoans` alone | 11 columns; the other aggregates absent, not zeroed |
+| Loan totals | 2 + 1 + 2 = 5 loans, 3 active — matches the loans report |
+| Return the 16-day loan | Arjun Mehta: `activeLoans` 1 → 0, `totalFines` 0.00 → 800.00 |
+| Pay that fine | `totalFines` 800.00, `outstandingFines` 800.00 → **0.00** |
+| `?status=Suspended` | 1 row (Kabir Singh) · `?status=Nonsense` → `400` |
+| `?membershipTypeId=2` | 2 rows, both `Student` |
+| `?membershipTypeId=999` | **Header line only** — an empty report is still a valid file |
+
 ---
 
 ## Questions you should be able to answer
@@ -341,6 +539,18 @@ rest.**
 8. Why is an inverted date range refused when an out-of-range page number is
    clamped?
 9. Why is the CSV written with a BOM when a BOM is usually unwanted?
+10. Why did quoting the ISBN field not stop Excel converting it to `9.78E+12`,
+    and what does?
+11. Why does the *row* declare a column as text rather than the encoder detecting
+    it? What breaks if the encoder guesses from the value's length?
+12. Why is `LIB-001000` declared a text column and yet left unprefixed?
+13. Why does the apostrophe not break the export → import round trip?
+14. The membership export's columns depend on the request. What is the silent
+    failure that design has to prevent, and how does `MemberExportColumns`
+    prevent it?
+15. Why are the member aggregates computed even when the request does not ask for
+    them — and what would change that decision?
+16. Why is `Sum` cast to `decimal?` before the null-coalesce?
 
 ---
 

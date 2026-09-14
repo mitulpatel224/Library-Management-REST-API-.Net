@@ -82,6 +82,7 @@ curl -X POST "http://localhost:5112/api/loans/issue" \n     -H "Content-Type: ap
 
 # Reports, streamed
 curl "http://localhost:5112/api/reports/overdue" -o overdue.csv
+curl "http://localhost:5112/api/reports/members/export?includeActiveLoans=true&includeFines=true" -o members.csv
 curl "http://localhost:5112/api/reports/fines/summary"
 ```
 
@@ -232,6 +233,7 @@ Implemented today (Phases 2, 3, 4, 6 and 7):
 | `POST` | `/api/books/import` | Bulk import from streamed CSV or JSON |
 | `GET` | `/api/books/import/template` | CSV template with a worked example |
 | `GET` | `/api/reports/books/export` | Catalogue export, CSV or JSON |
+| `GET` | `/api/reports/members/export` | Membership roll, with optional loan and fine counts |
 | `GET` | `/api/reports/loans` | Lending history by date, status, member |
 | `GET` | `/api/reports/overdue` | What is late, with projected fines |
 | `GET` | `/api/reports/fines/summary` | Aggregated totals, computed in SQL |
@@ -369,7 +371,7 @@ LibraryManagement.slnx
 
 ## Testing
 
-186 test cases across 131 test methods.
+197 test cases across 140 test methods.
 
 ### What is covered
 

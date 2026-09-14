@@ -1000,7 +1000,7 @@ accepts.
 
 ## Reports
 
-All four accept `?format=Csv|Json` except the summary, which is JSON only.
+All accept `?format=Csv|Json` except the summary, which is JSON only.
 Exports stream: rows are written to the response as the database produces them,
 so a large report starts downloading immediately and never exists in memory in
 full.
@@ -1009,6 +1009,17 @@ full.
 > `=`, `+`, `-` or `@` is prefixed with an apostrophe so Excel treats it as text
 > rather than executing it. JSON exports deliberately do not — a spreadsheet never
 > opens them, and prefixing would corrupt the data for every legitimate consumer.
+
+> **Identifier columns are forced to text in CSV.** `isbn`, `barcode`,
+> `membershipNumber` and phone numbers are names, not quantities. Left alone, a
+> spreadsheet reads a 13-digit ISBN as a number and shows `9.78E+12`, and eats
+> leading zeros. Those cells are prefixed with an apostrophe so they survive as
+> text, and only when the value is all digits — `LIB-001000` needs nothing and
+> gets nothing.
+>
+> The digits themselves are unchanged, so an exported catalogue still imports
+> straight back: the ISBN parser keeps only digits and discards the prefix. JSON
+> is unaffected — every value is already a JSON string.
 
 CSV is UTF-8 **with** a BOM, so Excel on Windows reads non-ASCII names correctly.
 Downloads are named `<report>-<yyyy-MM-dd>.<ext>`.
@@ -1025,6 +1036,47 @@ Column names match the import template, so an exported catalogue can be edited i
 a spreadsheet and imported straight back.
 
 **200**, streamed as a download.
+
+---
+
+### `GET /api/reports/members/export`
+
+The membership roll. Ordered by name.
+
+| Parameter | Notes |
+|---|---|
+| `format` | `Csv` (default) or `Json` |
+| `status` | `Active` · `Suspended` · `Expired` · `Cancelled` |
+| `membershipTypeId` | |
+| `includeBookCounts` | Adds `booksBorrowed` |
+| `includeActiveLoans` | Adds `activeLoans` |
+| `includeFines` | Adds `totalFines` **and** `outstandingFines` |
+
+Base columns:
+
+```
+memberId,membershipNumber,fullName,email,phone,membershipType,status,joinedOn,maxConcurrentLoans,loanPeriodDays
+```
+
+| Added column | Meaning |
+|---|---|
+| `booksBorrowed` | Loans ever taken, returned ones included |
+| `activeLoans` | Copies held right now — **includes overdue**, since they are still out |
+| `totalFines` | Every fine ever assessed against this member |
+| `outstandingFines` | Assessed but neither paid nor waived — what they still owe |
+
+`includeFines` adds two columns because the lifetime total cannot answer "who owes
+us money?" and the outstanding figure alone loses the history. Every one is a SQL
+aggregate.
+
+> **This is the only export whose columns depend on the request.** A consumer
+> parsing it positionally must send the same flags every time; read by header name
+> instead. An empty result still returns the header line.
+
+Like the overdue report, it carries email addresses and phone numbers — see
+[Phase 5, auth — deferred](#phase-5-auth--deferred).
+
+**200**, streamed as a download · **400** an unrecognised `status`.
 
 ---
 

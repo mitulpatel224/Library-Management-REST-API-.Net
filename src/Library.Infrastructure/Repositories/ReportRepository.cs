@@ -169,6 +169,97 @@ public sealed class ReportRepository : IReportRepository
     }
 
     /// <summary>
+    /// Streams the membership roll, with per-member loan and fine aggregates.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The aggregates are computed in SQL, as correlated subqueries.</b>
+    /// <c>Member</c> has no <c>Loans</c> or <c>Fines</c> navigation — deliberately,
+    /// since a member's loan history is unbounded and nothing in the domain needs
+    /// to walk it — so there is no collection to <c>Include</c> and no N+1 to
+    /// fall into. Each subquery lands on an index that already exists for other
+    /// reasons: <c>IX_Loans_MemberId_ReturnedAt</c> covers both loan counts, and
+    /// <c>IX_Fines_MemberId_PaidAt_WaivedAt</c> covers both fine totals.
+    /// </para>
+    /// <para>
+    /// <b>The query does not vary with the requested columns, and that is a
+    /// choice.</b> Making each aggregate conditional would mean either eight
+    /// hand-written projections or a <c>CASE WHEN @flag</c> the provider may
+    /// evaluate anyway — complexity, and a second query shape to reason about,
+    /// for work the indexes above already make cheap. So all four aggregates are
+    /// computed and the request decides which reach the file. The flags shape the
+    /// output, not the plan.
+    /// </para>
+    /// <para>
+    /// The one case that would overturn this is a library with a very large
+    /// membership exporting the roll frequently with no aggregates wanted. The
+    /// fix then is to branch on "any aggregate requested" and skip all four — one
+    /// extra shape rather than eight.
+    /// </para>
+    /// </remarks>
+    public IAsyncEnumerable<MemberExportRow> StreamMembersAsync(
+        MemberReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        IQueryable<Member> query = _context.Members.AsNoTracking();
+
+        if (request.Status is not null)
+        {
+            query = query.Where(m => m.Status == request.Status);
+        }
+
+        if (request.MembershipTypeId is > 0)
+        {
+            query = query.Where(m => m.MembershipTypeId == request.MembershipTypeId);
+        }
+
+        MemberExportColumns columns = request.Columns;
+
+        return query
+            .OrderBy(m => m.FullName)
+            .ThenBy(m => m.Id)
+            .Select(m => new MemberExportRow
+            {
+                Id = m.Id,
+                MembershipNumber = m.MembershipNumber,
+                FullName = m.FullName,
+                Email = m.Email,
+                Phone = m.Phone,
+                MembershipTypeName = m.MembershipType.Name,
+
+                // Enum to its name, so the file reads "Suspended" rather than the
+                // persisted 1. A report is read by people.
+                Status = m.Status.ToString(),
+
+                JoinedOn = m.JoinedOn,
+                MaxConcurrentLoans = m.MembershipType.MaxConcurrentLoans,
+                LoanPeriodDays = m.MembershipType.LoanPeriodDays,
+
+                BooksBorrowed = _context.Loans.Count(l => l.MemberId == m.Id),
+                ActiveLoans = _context.Loans
+                    .Count(l => l.MemberId == m.Id && l.ReturnedAt == null),
+
+                TotalFines = _context.Fines
+                    .Where(f => f.MemberId == m.Id)
+                    .Sum(f => (decimal?)f.Amount) ?? 0m,
+
+                // Neither paid nor waived - the figure a librarian chases. Summed
+                // as decimal? because SUM over no rows is NULL in SQL, and
+                // materialising that into a non-nullable decimal throws.
+                OutstandingFines = _context.Fines
+                    .Where(f => f.MemberId == m.Id && f.PaidAt == null && f.WaivedAt == null)
+                    .Sum(f => (decimal?)f.Amount) ?? 0m,
+
+                // Travels with the row so GetValues emits exactly the columns the
+                // header line promised.
+                Columns = columns,
+            })
+            .AsAsyncEnumerable();
+    }
+
+    /// <summary>
     /// Streams loans still out and past due at <paramref name="asOf"/>, with the
     /// fine each would attract.
     /// </summary>

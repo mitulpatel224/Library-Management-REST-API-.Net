@@ -1,3 +1,4 @@
+using Library.Application.Reports.Dtos;
 using Library.Application.Reports.Export;
 using Library.Domain.Enums;
 
@@ -41,6 +42,51 @@ public sealed record LoanReportRequest : ExportRequest
     public LoanStatus? Status { get; init; }
 
     public int? MemberId { get; init; }
+}
+
+/// <summary>Filters and optional columns for the membership export.</summary>
+/// <remarks>
+/// <para>
+/// The three <c>include*</c> flags default to <c>false</c>, so the unparameterised
+/// export is the membership roll and nothing more. A report that always carried
+/// every aggregate would be wider than most callers want and would make the
+/// interesting columns harder to find.
+/// </para>
+/// <para>
+/// They control the <b>file</b>, not the query — see
+/// <c>ReportRepository.StreamMembersAsync</c>.
+/// </para>
+/// </remarks>
+public sealed record MemberReportRequest : ExportRequest
+{
+    /// <summary>Only members in this state. All states when omitted.</summary>
+    public MemberStatus? Status { get; init; }
+
+    public int? MembershipTypeId { get; init; }
+
+    /// <summary>Adds <c>booksBorrowed</c>: loans ever taken, returned ones included.</summary>
+    public bool IncludeBookCounts { get; init; }
+
+    /// <summary>Adds <c>activeLoans</c>: copies the member is holding right now.</summary>
+    public bool IncludeActiveLoans { get; init; }
+
+    /// <summary>
+    /// Adds <c>totalFines</c> and <c>outstandingFines</c>.
+    /// </summary>
+    /// <remarks>
+    /// Two columns for one flag, because the lifetime total cannot answer the
+    /// question a librarian actually asks — "who owes us money?" — and the
+    /// outstanding figure alone loses the history.
+    /// </remarks>
+    public bool IncludeFines { get; init; }
+
+    /// <summary>The optional columns this request selects.</summary>
+    public MemberExportColumns Columns => new()
+    {
+        BookCounts = IncludeBookCounts,
+        ActiveLoans = IncludeActiveLoans,
+        Fines = IncludeFines,
+    };
 }
 
 /// <summary>Options for the overdue report.</summary>

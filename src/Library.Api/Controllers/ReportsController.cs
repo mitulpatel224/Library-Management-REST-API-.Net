@@ -54,6 +54,42 @@ public sealed class ReportsController : ControllerBase
             cancellationToken);
     }
 
+    /// <summary>Exports the membership roll, with optional per-member aggregates.</summary>
+    /// <remarks>
+    /// <para>
+    /// The base export is the membership roll: number, name, contact details,
+    /// membership type and its limits, status and join date.
+    /// </para>
+    /// <para>
+    /// Three flags <b>add</b> columns, all off by default:
+    /// <c>includeBookCounts</c> adds <c>booksBorrowed</c> (loans ever taken),
+    /// <c>includeActiveLoans</c> adds <c>activeLoans</c> (copies held right now),
+    /// and <c>includeFines</c> adds <c>totalFines</c> and
+    /// <c>outstandingFines</c>. Every one is a SQL aggregate.
+    /// </para>
+    /// <para>
+    /// This is the only export whose columns vary by request, so a consumer that
+    /// parses it positionally must send the same flags every time. Reading by
+    /// header name is the safer habit and costs nothing.
+    /// </para>
+    /// <para>
+    /// Like the overdue report, it carries email addresses and phone numbers —
+    /// worth remembering while Phase 5 auth is still deferred.
+    /// </para>
+    /// </remarks>
+    /// <response code="200">The export, streamed as a file download.</response>
+    [HttpGet("members/export", Name = "ExportMembers")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportMembers(
+        [FromQuery] MemberReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await StreamAsync(
+            "members", request.Format,
+            (stream, ct) => _reports.ExportMembersAsync(stream, request, ct),
+            cancellationToken);
+    }
+
     /// <summary>Exports loans in a date range.</summary>
     /// <remarks>
     /// <c>from</c> and <c>to</c> filter on the <b>issue</b> date and are
