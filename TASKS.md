@@ -15,12 +15,12 @@ done.
 
 | | |
 |---|---|
-| Phases complete | 1, 3, 4 · Phase 2 write side shipped, lookups and tests outstanding |
-| Next | 6 (import), then 7 (reports & export). **Phase 5 (auth) deliberately deferred** |
-| Endpoints | 33 controller actions (books, copies, members, membership types, loans, fines) + 2 health probes |
-| Tests | 142 unit + 5 integration, all passing |
+| Phases complete | 1, 3, 4, 6 · Phase 2 write side shipped, lookups and tests outstanding |
+| Next | 7 (reports & export). **Phase 5 (auth) deliberately deferred** |
+| Endpoints | 35 controller actions (books, copies, members, membership types, loans, fines, import) + 2 health probes |
+| Tests | 160 unit + 5 integration, all passing |
 | Build | Release, 0 warnings (warnings are errors) |
-| Branch | `main`, in sync with `origin/main` at `03fd4c6` |
+| Branch | `main` |
 
 **Phases 6 and 7 do not depend on Phase 5.** Import and export are both streamed
 endpoints over data that already exists. The only consequence of deferring auth is
@@ -175,13 +175,16 @@ in the `csharp-standards-1rivet` skill.
 
 ## Phase 6 — Import Books
 
-- [ ] `POST /api/books/import` — streamed CSV/JSON upload
-- [ ] Per-row validation with a row-level error report
-- [ ] Dedupe strategy (skip / update / fail) — Strategy pattern
-- [ ] Batched inserts in one transaction
-- [ ] Upload limits: size, extension, content type
-- [ ] `GET /api/books/import/template`
-- [ ] Tests + `docs/phases/phase-06.md`
+- [x] `POST /api/books/import` — streamed CSV/JSON upload
+- [x] Per-row validation with a row-level error report
+- [x] Dedupe strategy (skip / update / fail) — Strategy pattern
+- [x] Batched inserts (100 rows), two saves per batch for the join keys
+- [x] Upload limits: 20 MB, extension allow-list, multipart-only
+- [x] `GET /api/books/import/template`
+- [x] Reader unit tests (17)
+- [x] Lookup resolution by name, creating absent rows
+- [ ] Integration test for the import endpoint
+- [ ] `docs/phases/phase-06.md`
 
 ## Phase 7 — Reports & Export
 
@@ -306,3 +309,7 @@ in the `csharp-standards-1rivet` skill.
 | 2026-09-13 | `Loan.Return()` throws when `BookCopy` is not loaded, rather than using `?.` | Found by two failing unit tests. `BookCopy?.MarkReturned(condition)` silently closed the loan while leaving the copy `OnLoan` — and because the filtered index constrains only OPEN loans, nothing would ever point at the stranded copy; it would simply never be lendable again. `Loan.Issue` now sets the navigation as well as the id, and `Return` fails loudly. `?.` is a null check that looks like a safety feature and was suppressing the signal that mattered. | Keeping the null-conditional (silent data corruption); loading the copy defensively inside the entity (the domain cannot reach a repository) |
 | 2026-09-13 | Overdue loans are seeded, relative to `IClock` | Overdue behaviour cannot be reached by calling the API and waiting — a fresh loan is not late for a fortnight — so the overdue report and the whole fine path were unverifiable by hand and undemonstrable. Seeded loans 16 and 61 days overdue are computed from the clock, so they stay overdue whenever the database is rebuilt; a hard-coded date would be right on the day it was written and wrong every day after. | Only testing overdue behaviour in unit tests with `FakeClock` (leaves the HTTP path unexercised); hard-coded seed dates (rot immediately) |
 | 2026-09-13 | Fine payment is all-or-nothing | Part payment needs an amount-paid column, a rule for overpayment, and a decision about whether a partly-paid fine still blocks borrowing. Accepting an amount without those would half-answer all three. Recorded as issue 11 rather than built. | Accepting an arbitrary amount now and deciding the rest later |
+| 2026-09-14 | Import creates missing lookups rather than rejecting the row | A supplier's file carries names, not ids, and cannot pre-register anything. Rejecting every row whose publisher is unknown would fail the entire first import from any new supplier — exactly when the feature is needed. The cost is that a typo creates a lookup row, mitigated by case-insensitive matching and by reporting `lookupsCreated` so an unexpected number is visible. | Requiring every lookup to exist beforehand |
+| 2026-09-14 | Import reports partial success as 200, not 4xx | The unit of failure is a row, not the request. A file with 9,996 good rows and 4 bad ones should import the 9,996 and name the 4 with their line numbers. A 4xx would claim the upload was wrong when only part of it was. | Failing the whole file on any bad row |
+| 2026-09-14 | JSON import is lenient about unknown properties; the API is strict | Opposite settings for opposite situations. The API owns both ends of its contract, so an unrecognised field means the caller misunderstood and should be told. An import file comes from a supplier with their own schema, where extra fields are expected and refusing over one we do not need makes the feature unusable. | One global JSON policy |
+| 2026-09-14 | Malformed JSON imports nothing; malformed CSV imports the good rows | Not a design choice so much as a consequence worth documenting. `DeserializeAsyncEnumerable` buffers ahead, so a syntax error surfaces before earlier valid elements are yielded. CSV is line-oriented and recovers. Both behaviours are asserted by tests so neither changes silently. | Pretending the two formats behave alike |

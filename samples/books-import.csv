@@ -1,0 +1,11 @@
+isbn,title,subtitle,category,publisher,publishedOn,language,pageCount,description,authors,genres
+9781593275846,The Linux Command Line,A Complete Introduction,Technology,No Starch Press,2019-03-05,en,504,A guide to the shell,William Shotts,Programming;Reference
+9781617294136,Spring in Action,,Technology,Manning,2018-11-04,en,520,,Craig Walls,Programming
+9780262033848,Introduction to Algorithms,,Technology,MIT Press,2009-07-31,en,1292,,Thomas H. Cormen;Charles E. Leiserson,Programming;Reference
+9780596517748,JavaScript: The Good Parts,,Technology,O'Reilly Media,2008-05-01,en,176,,Douglas Crockford,Programming
+BADISBN,Bad Row One,,Technology,,,,,,,
+9780345539435,Bad Check Digit,,Technology,,,,,,,
+9781593275846,Duplicate In File,,Technology,,,,,,,
+,Missing ISBN,,Technology,,,,,,,
+9780134494166,No Category Row,,,Prentice Hall,,,,,,
+9780132350884,Clean Code,,Software Engineering,Prentice Hall,2008-08-01,en,464,,Robert C. Martin,Programming

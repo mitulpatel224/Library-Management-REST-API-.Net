@@ -80,6 +80,14 @@ public interface IBookRepository
     /// <summary>Loads a tracked book, with authors, genres and copies, for modification.</summary>
     Task<Book?> GetEntityAsync(int id, CancellationToken cancellationToken = default);
 
+    /// <summary>Loads a tracked book by ISBN, for the import update path.</summary>
+    /// <remarks>
+    /// Distinct from <c>GetByIsbnAsync</c>, which returns a DTO for reading. This
+    /// returns the tracked entity, because the importer needs to invoke
+    /// <c>UpdateDetails</c> and <c>SetAuthors</c> on it.
+    /// </remarks>
+    Task<Book?> GetEntityByIsbnAsync(string isbn, CancellationToken cancellationToken = default);
+
     /// <summary>Loads a tracked copy for modification.</summary>
     Task<BookCopy?> GetCopyEntityAsync(int copyId, CancellationToken cancellationToken = default);
 

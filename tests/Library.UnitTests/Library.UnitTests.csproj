@@ -21,6 +21,20 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Library.Domain\Library.Domain.csproj" />
     <ProjectReference Include="..\..\src\Library.Application\Library.Application.csproj" />
+
+    <!--
+      Infrastructure is referenced for the import READERS only.
+
+      The rule this project holds to is behavioural, not structural: a unit test
+      does no I/O. The CSV and JSON readers qualify - they are pure parsers over
+      a Stream, and these tests run them against a MemoryStream with no database
+      and no HTTP.
+
+      What must NOT appear here is a test that constructs a DbContext or a
+      repository. Those need a real schema to mean anything, and they belong in
+      Library.IntegrationTests where one exists.
+    -->
+    <ProjectReference Include="..\..\src\Library.Infrastructure\Library.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

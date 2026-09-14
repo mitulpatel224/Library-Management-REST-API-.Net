@@ -1,0 +1,8 @@
+[
+  { "isbn": "9780321146533", "title": "Test Driven Development", "category": "Software Engineering",
+    "publisher": "Addison-Wesley", "publishedOn": "2002-11-08", "pageCount": "240",
+    "authors": "Kent Beck", "genres": "Programming", "supplierSku": "IGNORED-EXTRA-FIELD" },
+  { "isbn": "9780201485677", "title": "Refactoring: Improving the Design", "category": "Software Engineering",
+    "authors": "Martin Fowler", "genres": "Programming" },
+  { "isbn": "NOT-AN-ISBN", "title": "Bad JSON Row", "category": "Technology" }
+]

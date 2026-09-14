@@ -409,6 +409,33 @@ public sealed class BookRepository : IBookRepository
             .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
     }
 
+    /// <summary>
+    /// Loads a tracked book by ISBN, with its join collections, for the import
+    /// update path.
+    /// </summary>
+    /// <remarks>
+    /// <c>Include</c>s the joins because <c>SetAuthors</c> clears and rebuilds
+    /// them — without the existing rows loaded, EF Core has nothing to delete and
+    /// the old credits survive alongside the new ones.
+    /// </remarks>
+    public async Task<Book?> GetEntityByIsbnAsync(
+        string isbn,
+        CancellationToken cancellationToken = default)
+    {
+        string normalized = new([.. (isbn ?? string.Empty).Where(char.IsAsciiDigit)]);
+
+        if (normalized.Length == 0)
+        {
+            return null;
+        }
+
+        return await _context.Books
+            .Include(b => b.BookAuthors)
+            .Include(b => b.BookGenres)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(b => b.Isbn == normalized, cancellationToken);
+    }
+
     public async Task<BookCopy?> GetCopyEntityAsync(
         int copyId,
         CancellationToken cancellationToken = default)

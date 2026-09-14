@@ -47,6 +47,7 @@ public static class DependencyInjection
         services.AddScoped<Members.IMemberService, Members.MemberService>();
         services.AddScoped<Loans.ILoanService, Loans.LoanService>();
         services.AddScoped<Loans.IFineService, Loans.FineService>();
+        services.AddScoped<Books.Import.IBookImportService, Books.Import.BookImportService>();
 
         // Handlers are resolved by the dispatcher from the closed interface type,
         // so each must be registered against IDomainEventHandler<TEvent> and not

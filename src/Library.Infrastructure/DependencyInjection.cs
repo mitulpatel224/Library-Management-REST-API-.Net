@@ -1,4 +1,5 @@
 using Library.Application.Books;
+using Library.Application.Books.Import;
 using Library.Application.Common.Abstractions;
 using Library.Application.Loans;
 using Library.Application.Members;
@@ -85,6 +86,18 @@ public static class DependencyInjection
         // Singleton so subscribers attached at startup stay attached. A scoped
         // notifier would drop every subscription at the end of each request.
         services.AddSingleton<INotificationService, NotificationService>();
+
+        // Import readers. Registered as a SET so BookImportReaderFactory can
+        // index them by format - adding XML later is one more AddScoped here and
+        // no change to the factory or the service.
+        services.AddScoped<IBookImportReader, Import.CsvBookImportReader>();
+        services.AddScoped<IBookImportReader, Import.JsonBookImportReader>();
+        services.AddScoped<IBookImportReaderFactory, Import.BookImportReaderFactory>();
+
+        // Scoped, and deliberately stateful for the life of one import: it caches
+        // every lookup it resolves, so a 10,000-row feed does not issue 10,000
+        // near-identical queries for the same publisher.
+        services.AddScoped<ILookupResolver, Import.LookupResolver>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
