@@ -803,33 +803,307 @@ is precisely the operation that has to be reviewable afterwards.
 Both return `200 Healthy` or `503 Unhealthy` with a plain-text body.
 
 ---
+### `POST /api/books`
+
+Catalogues a new book. The ISBN may be hyphenated; it is normalised and its check
+digit verified.
+
+```json
+{
+  "isbn": "978-1-59327-584-6",
+  "title": "The Linux Command Line",
+  "subtitle": "A Complete Introduction",
+  "categoryId": 3,
+  "publisherId": 2,
+  "publishedOn": "2019-03-05",
+  "language": "en",
+  "pageCount": 504,
+  "description": "A guide to the shell",
+  "authorIds": [11, 5],
+  "genreIds": [1, 5]
+}
+```
+
+`authorIds` order becomes credit order. `membershipNumber`-style server-assigned
+fields have no equivalent here, but note what is **absent**: `id`, `createdAt`.
+Sending them is a `400` — see [Strict JSON](#strict-json) below.
+
+**201** + `Location` · **409** `book.duplicate_isbn` · **422** validation, or a
+referenced category/publisher/author/genre that does not exist
+(`book.category_not_found`, `book.author_not_found` — all missing ids reported at
+once).
+
+---
+
+### `PUT /api/books/{id}`
+
+Full replacement of details, authors and genres. Sending the same body twice is
+idempotent.
+
+**The ISBN cannot be changed.** It is the natural key — one ISBN is one title —
+so altering it would make this a different book. Delete and re-create instead.
+
+**200** · **404** · **422**
+
+---
+
+### `DELETE /api/books/{id}`
+
+**204** · **404** · **409** `book.has_copies_on_loan` — refused while any copy is
+out, naming the barcodes. The cascade would otherwise delete a copy a member is
+holding.
+
+---
+
+### `POST /api/books/{id}/copies`
+
+```json
+{ "barcode": "LIB-009001", "condition": "New", "shelfLocation": "T-16-1" }
+```
+
+Barcodes are unique **library-wide**, not per title.
+
+**201** · **404** · **409** `copy.duplicate_barcode` · **422**
+
+---
+
+### `PUT /api/copies/{id}`
+
+```json
+{ "barcode": "LIB-009001", "condition": "Good", "shelfLocation": "T-16-2" }
+```
+
+All three fields are required — it is a `PUT`, so a full replacement.
+
+**The barcode is editable**, so a damaged or unreadable label can be re-issued.
+Delete-and-recreate would discard the copy's loan history. Uniqueness is checked
+excluding the row being edited, so leaving the barcode unchanged does not conflict
+with itself. Values are normalised to upper case.
+
+**Status is deliberately not settable.** A copy becomes `OnLoan` by being issued
+and `Available` by being returned; letting a client set it directly would allow a
+copy to be marked available while a member still holds it.
+
+**200** · **404** · **409** `copy.duplicate_barcode` · **422**
+
+---
+
+### `DELETE /api/copies/{id}`
+
+**204** · **404** · **409** `copy.on_loan`
+
+---
+
+## Strict JSON
+
+Every endpoint rejects JSON properties the request type does not declare:
+
+```json
+{
+  "status": 400,
+  "errors": {
+    "$.id": ["The JSON property 'id' could not be mapped to any .NET member
+              contained in type 'UpdateBookCopyRequest'."]
+  }
+}
+```
+
+**Why.** Request types are deliberately narrow — they exist to prevent mass
+assignment (OWASP API6), so a caller cannot set `id`, `createdAt` or `status` by
+posting a fuller object back. But `System.Text.Json` discards unknown members
+*silently* by default, which produced a genuinely misleading API: a caller could
+`PUT` a copy back with a changed `barcode`, receive `200`, and reasonably conclude
+the barcode had changed. It had not — the DTO was right to ignore it; the `200`
+was wrong.
+
+This is stricter than most public APIs. It is the right default when you own both
+ends of the contract.
+
+---
+
+## Import
+
+### `POST /api/books/import`
+
+`multipart/form-data`. The format is taken from the file extension: `.csv` or
+`.txt` for CSV, `.json` for JSON.
+
+| Parameter | Values | Default |
+|---|---|---|
+| `duplicates` | `Skip` · `Update` · `Fail` | `Skip` |
+
+Expected CSV header — only `isbn`, `title` and `category` are required:
+
+```
+isbn,title,subtitle,category,publisher,publishedOn,language,pageCount,description,authors,genres
+```
+
+`authors` and `genres` are `;`-separated; author order becomes credit order.
+Headers match case-insensitively and ignore underscores, so `PageCount`,
+`pagecount` and `page_count` all bind.
+
+Lookups are referenced **by name**, not id, and are created when absent — a
+supplier's file cannot know this database's ids. `lookupsCreated` reports how many
+were made; an unexpectedly high number means a mis-mapped column or a file full of
+typos.
+
+```json
+{
+  "totalRows": 10,
+  "imported": 3,
+  "updated": 0,
+  "skipped": 2,
+  "failed": 5,
+  "lookupsCreated": 5,
+  "errors": [
+    { "lineNumber": 7, "isbn": "9780345539435",
+      "errorCode": "import.invalid_isbn",
+      "message": "ISBN check digit is invalid." }
+  ],
+  "hasErrors": true
+}
+```
+
+**200 even when rows failed.** Partial success is the normal case: the request
+succeeded and the rejected rows are data in the body. A 4xx would claim the upload
+was wrong when only part of it was.
+
+For CSV, `lineNumber` counts the header as line 1. For JSON it is the array index.
+
+> **Malformed CSV imports its good rows; malformed JSON imports nothing.** The
+> JSON reader buffers ahead, so a syntax error surfaces before the valid elements
+> preceding it are yielded.
+
+**Limits:** 20 MB, extension allow-list, `multipart/form-data` only.
+
+**422** `import.file_required` · `import.file_too_large` ·
+`import.unsupported_file_type` — a 422 rather than 400 because the multipart
+request itself is well formed; it is the content the rules reject.
+
+**413** if the body exceeds the framework limit before the handler runs.
+
+**Row error codes:** `import.invalid_isbn`, `import.duplicate_in_file`,
+`import.duplicate_isbn`, `import.title_required`, `import.category_required`,
+`import.invalid_date`, `import.invalid_page_count`, `import.row_unreadable`.
+
+---
+
+### `GET /api/books/import/template`
+
+A CSV template with the expected header and one worked example, generated from
+the same field names the reader binds — so it cannot drift from what the importer
+accepts.
+
+**200**, `text/csv`, as a download.
+
+---
+
+## Reports
+
+All four accept `?format=Csv|Json` except the summary, which is JSON only.
+Exports stream: rows are written to the response as the database produces them,
+so a large report starts downloading immediately and never exists in memory in
+full.
+
+> **CSV exports neutralise spreadsheet formula injection.** A value beginning
+> `=`, `+`, `-` or `@` is prefixed with an apostrophe so Excel treats it as text
+> rather than executing it. JSON exports deliberately do not — a spreadsheet never
+> opens them, and prefixing would corrupt the data for every legitimate consumer.
+
+CSV is UTF-8 **with** a BOM, so Excel on Windows reads non-ASCII names correctly.
+Downloads are named `<report>-<yyyy-MM-dd>.<ext>`.
+
+### `GET /api/reports/books/export`
+
+| Parameter | Notes |
+|---|---|
+| `format` | `Csv` (default) or `Json` |
+| `categoryId`, `publisherId` | |
+| `availableOnly` | Only titles with a copy on the shelf |
+
+Column names match the import template, so an exported catalogue can be edited in
+a spreadsheet and imported straight back.
+
+**200**, streamed as a download.
+
+---
+
+### `GET /api/reports/loans`
+
+| Parameter | Notes |
+|---|---|
+| `from`, `to` | Filter on the **issue** date, inclusive of both days |
+| `status` | `Active` · `Overdue` · `Returned` |
+| `memberId` | |
+| `format` | |
+
+Status is evaluated as at now, so a loan currently late reports `Overdue` even if
+it was within its term for most of the period.
+
+**200** · **422** `report.invalid_date_range` when `to` is earlier than `from`.
+
+---
+
+### `GET /api/reports/overdue`
+
+| Parameter | Notes |
+|---|---|
+| `asOf` | Defaults to today; a past date answers "who was overdue on the 1st?" |
+| `format` | |
+
+Carries each member's email and phone, because the purpose of this report is to
+contact them.
+
+`projectedFine` is what the fine **would** be if the copy came back on `asOf` —
+`daysOverdue × ratePerDay`. Nothing is charged until the copy is actually
+returned.
+
+**200**, streamed as a download.
+
+---
+
+### `GET /api/reports/fines/summary`
+
+JSON, not a file. Every figure is a SQL aggregate. Defaults to the current year
+to date.
+
+```json
+{
+  "from": "2026-01-01", "to": "2026-09-14",
+  "totalFines": 1,
+  "totalAssessed": 800.0,
+  "totalPaid": 0.0,
+  "totalWaived": 0.0,
+  "totalOutstanding": 800.0,
+  "paidCount": 0, "waivedCount": 0, "outstandingCount": 1,
+  "totalOverdueDays": 16,
+  "currency": "INR",
+  "byMonth": [
+    { "month": "2026-09", "count": 1, "assessed": 800.0, "outstanding": 800.0 }
+  ]
+}
+```
+
+**200** · **422** `report.invalid_date_range`
+
+---
 
 ## Planned
 
-### Phase 2, write side
+### Phase 5, auth — deferred
 
-| Method | Route | Success | Failure |
-|---|---|---|---|
-| `POST` | `/api/books` | 201 + `Location` | 409 duplicate ISBN · 422 validation |
-| `PUT` | `/api/books/{id}` | 200 | 404 · 422 |
-| `DELETE` | `/api/books/{id}` | 204 | 404 · 409 copies on loan |
-| `POST` | `/api/books/{id}/copies` | 201 | 404 · 409 duplicate barcode |
-| `DELETE` | `/api/copies/{id}` | 204 | 404 · 409 on loan |
+Deliberately deferred behind Phases 6 and 7, neither of which depends on it. The
+consequence is that **every endpoint currently ships unauthenticated**, including
+the overdue report, which carries member email addresses and phone numbers.
+Phase 8 revisits this regardless.
 
-### Phase 4, lending
+| Method | Route |
+|---|---|
+| `POST` | `/api/auth/register` · `/login` · `/refresh` · `/logout` |
+| `GET` | `/api/loans/me` — the caller's own loans |
 
-| Method | Route | Success | Failure |
-|---|---|---|---|
-| `POST` | `/api/loans/issue` | 201 | **409 copy already on loan** · 422 loan limit reached |
-| `POST` | `/api/loans/{id}/return` | 200 + fine if overdue | 404 · 409 already returned |
-| `GET` | `/api/loans` | 200 | |
-| `GET` | `/api/loans/me` | 200 — caller's own loans | 401 |
-| `POST` | `/api/fines/{id}/pay` | 200 | 404 · 409 already paid |
-
-### Phase 5, auth
-
-`POST /api/auth/register | login | refresh | logout`. Bearer tokens; access token
-~15 minutes, refresh token rotated on use and stored hashed.
+Bearer tokens; access token ~15 minutes, refresh token rotated on use and stored
+hashed.
 
 ```
 Authorization: Bearer <token>

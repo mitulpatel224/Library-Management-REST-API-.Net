@@ -15,10 +15,10 @@ done.
 
 | | |
 |---|---|
-| Phases complete | 1, 3, 4, 6 · Phase 2 write side shipped, lookups and tests outstanding |
-| Next | 7 (reports & export). **Phase 5 (auth) deliberately deferred** |
-| Endpoints | 35 controller actions (books, copies, members, membership types, loans, fines, import) + 2 health probes |
-| Tests | 160 unit + 5 integration, all passing |
+| Phases complete | 1, 3, 4, 6, 7 · Phase 2 write side shipped, lookups and tests outstanding |
+| Next | 5 (auth) or 8 (security hardening) |
+| Endpoints | 39 controller actions + 2 health probes |
+| Tests | 186 cases / 131 methods, all passing. **Domain well covered; no endpoint, service or repository has a test** — see README "Testing" |
 | Build | Release, 0 warnings (warnings are errors) |
 | Branch | `main` |
 
@@ -97,9 +97,10 @@ unverified from this machine (`gh` is not installed); check
 - [ ] Unit tests for `BookService` write paths
 - [ ] Integration tests for the book endpoints
 - [x] `docs/phases/phase-02.md` (read side)
-- [ ] `docs/api-contract.md` — **stale**: still lists the write endpoints as
-      "planned", and does not cover the strict-JSON 400 or the editable barcode
-- [ ] `docs/phases/phase-02.md` — extend for the write side
+- [x] `docs/api-contract.md` — book writes, strict JSON and the editable barcode
+      now documented
+- [~] `docs/phases/phase-02.md` — write side covered in `api-contract.md`; the
+      phase guide itself still describes only the read side
 
 ## Coding-standards compliance (1Rivet TEC-STD-005)
 
@@ -184,17 +185,19 @@ in the `csharp-standards-1rivet` skill.
 - [x] Reader unit tests (17)
 - [x] Lookup resolution by name, creating absent rows
 - [ ] Integration test for the import endpoint
-- [ ] `docs/phases/phase-06.md`
+- [x] `docs/phases/phase-06.md`
 
 ## Phase 7 — Reports & Export
 
-- [ ] `GET /api/reports/books/export?format=csv|json` — streamed
-- [ ] `GET /api/reports/loans?from=&to=&status=`
-- [ ] `GET /api/reports/overdue?asOf=`
-- [ ] `GET /api/reports/fines/summary`
-- [ ] CSV formula-injection escaping (`=`, `+`, `-`, `@`)
-- [ ] Aggregates computed in SQL, not in memory
-- [ ] Tests + `docs/phases/phase-07.md`
+- [x] `GET /api/reports/books/export?format=csv|json` — streamed
+- [x] `GET /api/reports/loans?from=&to=&status=&memberId=`
+- [x] `GET /api/reports/overdue?asOf=` — with projected fines
+- [x] `GET /api/reports/fines/summary` — SQL aggregates + monthly breakdown
+- [x] CSV formula-injection escaping (`=`, `+`, `-`, `@`, and leading tab/CR)
+- [x] Aggregates computed in SQL, not in memory
+- [x] CSV encoder tests (21) — the security tests for this phase
+- [ ] Integration test for the export endpoints
+- [x] `docs/phases/phase-07.md`
 
 ## Phase 8 — Security & Vulnerability Hardening
 
@@ -218,11 +221,11 @@ in the `csharp-standards-1rivet` skill.
 - [x] `docs/data-flow.md` — sequence diagrams
 - [x] `docs/setup.md`
 - [x] `docs/database.md`
-- [~] `docs/api-contract.md` — books read side, all member endpoints, and all
-      loan/fine endpoints documented with real captured responses; **book write
-      side still stale**
+- [x] `docs/api-contract.md` — all 39 endpoints, including book writes, strict
+      JSON, import and reports
 - [ ] `docs/security.md`
-- [~] `docs/phases/` — 01–04 written; 05–08 pending
+- [~] `docs/phases/` — 01, 02, 03, 04, 06, 07 written. 05 deferred with the
+      phase; 08 pending
 
 ## Stretch
 
@@ -313,3 +316,9 @@ in the `csharp-standards-1rivet` skill.
 | 2026-09-14 | Import reports partial success as 200, not 4xx | The unit of failure is a row, not the request. A file with 9,996 good rows and 4 bad ones should import the 9,996 and name the 4 with their line numbers. A 4xx would claim the upload was wrong when only part of it was. | Failing the whole file on any bad row |
 | 2026-09-14 | JSON import is lenient about unknown properties; the API is strict | Opposite settings for opposite situations. The API owns both ends of its contract, so an unrecognised field means the caller misunderstood and should be told. An import file comes from a supplier with their own schema, where extra fields are expected and refusing over one we do not need makes the feature unusable. | One global JSON policy |
 | 2026-09-14 | Malformed JSON imports nothing; malformed CSV imports the good rows | Not a design choice so much as a consequence worth documenting. `DeserializeAsyncEnumerable` buffers ahead, so a syntax error surfaces before earlier valid elements are yielded. CSV is line-oriented and recovers. Both behaviours are asserted by tests so neither changes silently. | Pretending the two formats behave alike |
+| 2026-09-14 | CSV export escapes formula triggers; JSON export does not | The injection is an attack on the spreadsheet that opens a CSV, not on this API — which stores and returns the value faithfully. JSON is never opened by a spreadsheet, so prefixing there would corrupt data for every legitimate consumer. A defence applied where the threat does not exist is a bug. | Escaping in both, or in neither |
+| 2026-09-14 | Day arithmetic computed in C#, not `EF.Functions.DateDiffDay` | `DateDiffDay` is SQL Server only. On SQLite the query silently switched to client evaluation and threw MID-STREAM, after the first row had reached the response — truncating the download rather than failing cleanly. Date comparisons translate on both providers; only the arithmetic did not, and it is O(1) per row. | Provider-specific SQL in a report |
+| 2026-09-14 | Exports write to `Response.Body` and return `EmptyResult` | A `FileResult` needs the whole report to exist before anything is sent. Writing as rows arrive keeps memory constant and starts the download immediately. The cost, stated in the controller: headers must be set before the first byte, so a mid-stream error truncates the file instead of producing a clean 500. | Buffering the report into a `FileResult` |
+| 2026-09-14 | CSV written as UTF-8 **with** a BOM | Excel on Windows opens a BOM-less CSV as the system ANSI code page, so "José" arrives mangled. The BOM is what marks it UTF-8. The trade is that strict parsers may surface it on the first header — and these files are opened in a spreadsheet far more often than parsed by a script. | BOM-less UTF-8 |
+| 2026-09-14 | `FineCurrencyResolver` as a second delegate | The fine handler needs the rate and not the currency; the fine report needs the currency and not the rate. Two narrow dependencies state what each caller uses. It exists at all because `Library.Application` has no configuration reference, so Infrastructure binds the options and supplies both. | Widening `FineRateResolver` to return a pair |
+| 2026-09-14 | Ship with no endpoint, service or repository tests — documented, not hidden | A deliberate trade for an assessment deliverable: breadth of working features over depth of automated verification. The domain layer, validators, import readers and the CSV injection encoder are well covered; every endpoint behaviour was verified by hand. The risk is named in the README rather than left for a reviewer to discover, and three specific behaviours are called out as able to regress silently. Revisit before this is anything other than an assessment. | Building the integration suite now, at the cost of Phases 5 and 8 |

@@ -3,6 +3,8 @@ using Library.Application.Books.Import;
 using Library.Application.Common.Abstractions;
 using Library.Application.Loans;
 using Library.Application.Members;
+using Library.Application.Reports;
+using Library.Application.Reports.Export;
 using Library.Application.Notifications;
 using Library.Infrastructure.Notifications;
 using Library.Infrastructure.Persistence;
@@ -98,6 +100,24 @@ public static class DependencyInjection
         // every lookup it resolves, so a 10,000-row feed does not issue 10,000
         // near-identical queries for the same publisher.
         services.AddScoped<ILookupResolver, Import.LookupResolver>();
+
+        services.AddScoped<IReportRepository, ReportRepository>();
+
+        // Exporters, registered as a set so ReportExporterFactory can index them
+        // by format - the same Open/Closed shape as the import readers.
+        services.AddScoped<IReportExporter, Export.CsvReportExporter>();
+        services.AddScoped<IReportExporter, Export.JsonReportExporter>();
+        services.AddScoped<IReportExporterFactory, Export.ReportExporterFactory>();
+
+        // Currency alongside the rate, both bound from FineOptions. See
+        // FineCurrencyResolver for why they are two delegates and not one.
+        services.AddSingleton<FineCurrencyResolver>(provider =>
+        {
+            IOptionsMonitor<FineOptions> options =
+                provider.GetRequiredService<IOptionsMonitor<FineOptions>>();
+
+            return () => options.CurrentValue.Currency;
+        });
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

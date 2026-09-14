@@ -61,8 +61,10 @@ dotnet run --project src/Library.Api
 
 Then open **<http://localhost:5112/swagger>**.
 
-On first run the app applies migrations and seeds **15 books with 41 copies**,
-so there is real data to query immediately. Both are controlled by
+On first run the app applies migrations and seeds **15 books with 41 copies, 9
+members across 4 membership types, and 5 loans** — including members in every
+status and loans already overdue, so every rule has something to act on
+immediately. Both are controlled by
 `Database:ApplyMigrationsOnStartup` in `appsettings.Development.json` and are off
 by default outside development.
 
@@ -73,6 +75,14 @@ curl "http://localhost:5112/api/books?search=design"
 curl "http://localhost:5112/api/books?author=Fowler&sortBy=published&sortDir=desc"
 curl "http://localhost:5112/api/books/isbn/978-0-13-235088-4"
 curl "http://localhost:5112/api/books/1"
+
+# Lending: the rule the whole system exists for
+curl -X POST "http://localhost:5112/api/loans/issue" \n     -H "Content-Type: application/json" -d "{\"bookCopyId\":39,\"memberId\":1}"
+# the same copy again -> 409 loan.copy_already_on_loan
+
+# Reports, streamed
+curl "http://localhost:5112/api/reports/overdue" -o overdue.csv
+curl "http://localhost:5112/api/reports/fines/summary"
 ```
 
 Health probes: `/health/live` (process only) and `/health/ready` (includes the
@@ -122,24 +132,32 @@ including where each SOLID principle shows up.
 
 ## Data model
 
-Normalised to third normal form. Eight tables in the catalogue so far, with 14 indexes:
+Normalised to third normal form. **12 tables, 23 indexes.**
 
 ```
-Category ──┐                    ┌── Publisher
-(self-ref) │                    │
-           ▼                    ▼
-         ┌──────────────────────────┐
-         │          Book            │  one row per ISBN
-         │  Isbn (UQ), Title, ...   │
-         └──────────────────────────┘
-           │          │           │
-   ┌───────┘          │           └────────┐
-   ▼                  ▼                    ▼
-BookAuthor       BookGenre            BookCopy      physical items
-(M:N + order)    (M:N)                Barcode (UQ)
-   │                  │                    │
-   ▼                  ▼                    ▼
- Author            Genre              (Loan → Phase 4)
+Category ──┐                    ┌── Publisher        MembershipType
+(self-ref) │                    │                          │
+           ▼                    ▼                          ▼
+         ┌──────────────────────────┐              ┌──────────────┐
+         │          Book            │              │    Member    │
+         │  Isbn (UQ), Title, ...   │              │ MemberNo (UQ)│
+         └──────────────────────────┘              │  Email (UQ)  │
+           │          │           │                └──────────────┘
+   ┌───────┘          │           └────────┐               │
+   ▼                  ▼                    ▼               │
+BookAuthor       BookGenre            BookCopy             │
+(M:N + order)    (M:N)                Barcode (UQ)         │
+   │                  │                    │               │
+   ▼                  ▼                    └──────┐  ┌─────┘
+ Author            Genre                          ▼  ▼
+                                                ┌────────┐
+                                                │  Loan  │
+                                                └────────┘
+                                                     │ 1:1
+                                                     ▼
+                                                 ┌────────┐
+                                                 │  Fine  │
+                                                 └────────┘
 ```
 
 Points worth noting:
@@ -157,8 +175,8 @@ step removes, is in `docs/data-model.md`.
 
 ### The invariant that enforces the core rule
 
-Phase 4 adds the rule the problem statement is built around, and it is enforced
-in the **database**, not only in C#:
+The rule the problem statement is built around is enforced in the **database**,
+not only in C#:
 
 ```sql
 CREATE UNIQUE INDEX "UX_Loans_BookCopyId_Active"
@@ -174,7 +192,7 @@ concurrent issue requests can both pass that check. Only one can win the index.
 
 ## API surface
 
-Implemented today (Phases 2, 3 and 4):
+Implemented today (Phases 2, 3, 4, 6 and 7):
 
 | Method | Route | Description |
 |---|---|---|
@@ -211,6 +229,12 @@ Implemented today (Phases 2, 3 and 4):
 | `GET` | `/api/fines/{id}` | One fine |
 | `POST` | `/api/fines/{id}/pay` | Settle in full |
 | `POST` | `/api/fines/{id}/waive` | Cancel a fine, with a required reason |
+| `POST` | `/api/books/import` | Bulk import from streamed CSV or JSON |
+| `GET` | `/api/books/import/template` | CSV template with a worked example |
+| `GET` | `/api/reports/books/export` | Catalogue export, CSV or JSON |
+| `GET` | `/api/reports/loans` | Lending history by date, status, member |
+| `GET` | `/api/reports/overdue` | What is late, with projected fines |
+| `GET` | `/api/reports/fines/summary` | Aggregated totals, computed in SQL |
 | `GET` | `/health/live` | Liveness — does not touch the database |
 | `GET` | `/health/ready` | Readiness — includes the database |
 
@@ -345,20 +369,58 @@ LibraryManagement.slnx
 
 ## Testing
 
-31 tests: 26 unit and 5 integration.
+186 test cases across 131 test methods.
 
-**Unit tests** cover entity identity semantics, paging clamps, and page
-arithmetic — no database, no HTTP.
+### What is covered
 
-**Integration tests** boot the real `Program.cs` through
-`WebApplicationFactory` and issue genuine HTTP requests against a private
-SQLite database per test class. They verify what unit tests structurally cannot:
-routing, middleware order, EF mappings, and the SQL actually generated.
+| Area | Methods | What they pin |
+|---|---|---|
+| Domain entities | 57 | Loan lifecycle and overdue arithmetic, member status transitions, fine assessment, entity identity |
+| Import readers | 15 | CSV and JSON parsing, line numbering, malformed-row recovery |
+| Validators | 16 | Field rules, including the date rules that need an injected clock |
+| CSV encoder | 12 | **Formula-injection defence** — the security tests for the export |
+| Value objects | 8 | ISBN check digit, email and phone normalisation |
+| Paging | 12 | Clamping, page arithmetic, the `pageSize` ceiling |
+| Fine handler | 6 | Post-commit assessment, with a substituted repository |
 
-SQLite rather than EF Core's InMemory provider, deliberately: InMemory is not a
-relational database and ignores unique indexes and foreign keys. A suite built on
-it would happily allow two active loans on one copy — the exact rule this system
-exists to enforce.
+These run with no database and no HTTP, and they are where the business rules
+live.
+
+### What is NOT covered — read this before trusting the number
+
+**No endpoint has an automated test.** The five integration tests cover startup,
+both health probes, the OpenAPI document, Swagger UI, and the ProblemDetails
+shape on an unmatched route. The only API path any of them touches is
+`/api/does-not-exist`.
+
+**No service or repository has a test class.** `BookService`, `MemberService`,
+`LoanService`, `FineService`, `ReportService` and `BookImportService` are
+exercised only indirectly, through the entities they call.
+
+Every endpoint behaviour described in this README was verified by calling it and
+reading the response — but nothing would catch a regression tomorrow. Three
+behaviours are subtle enough to break silently:
+
+- the barcode uniqueness check excluding the row being edited (without it, every
+  ordinary copy edit returns a spurious `409`)
+- the membership-number placeholder (without it, two concurrent registrations
+  collide on the unique index)
+- provider-agnostic day arithmetic in the reports (a SQL Server-only function
+  here failed *mid-stream* on SQLite, truncating a download with no error
+  reaching the client)
+
+**This is a deliberate, recorded trade** — breadth of working features over depth
+of automated verification, for an assessment deliverable. It is not an oversight,
+and the unticked items stay visible in [`TASKS.md`](TASKS.md) rather than being
+quietly dropped. The honest summary: the domain layer is well tested; the HTTP
+surface is hand-verified.
+
+### On the test database
+
+Integration tests use SQLite rather than EF Core's InMemory provider,
+deliberately: InMemory is not a relational database and ignores unique indexes
+and foreign keys. A suite built on it would happily allow two active loans on one
+copy — the exact rule this system exists to enforce.
 
 ```bash
 dotnet test --solution LibraryManagement.slnx -c Release
@@ -401,13 +463,20 @@ an executable:
 | 2 | Book APIs | 🔨 Reads and writes done; lookups, tests and phase doc outstanding |
 | 3 | Reader / Member APIs | ✅ Done |
 | 4 | Lending APIs — loans, overdue, fines | ✅ Done |
-| 5 | Authentication & authorization | ⏸️ Deferred — 6 and 7 first |
-| 6 | Import books from CSV/JSON | ⬜ Next |
-| 7 | Reports & CSV export | ⬜ After 6 |
-| 8 | Security & vulnerability hardening | ⬜ |
+| 5 | Authentication & authorization | ⏸️ Deferred — see note below |
+| 6 | Import books from CSV/JSON | ✅ Done |
+| 7 | Reports & CSV export | ✅ Done |
+| 8 | Security & vulnerability hardening | ⬜ Next |
 | 9 | Reservations | ⬜ Stretch |
 | 10 | CQRS refactor | ⬜ Stretch |
 
 Fines are fixed at **₹50 per overdue day**, supplied through a delegate bound to
 configuration so that making the rate librarian-configurable later is a data
 change rather than a code change.
+
+**On deferring Phase 5.** Import and export are both streamed endpoints over data
+that already exists, and neither depends on authentication — so building them
+first cost nothing and delivered two of the brief's stated requirements (file
+handling, async) earlier. The consequence is that **every endpoint currently ships
+unauthenticated**, including the overdue report, which carries member email
+addresses and phone numbers. Phase 8 revisits the whole surface regardless.

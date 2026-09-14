@@ -60,3 +60,25 @@ public sealed class FineOptions
 /// </remarks>
 /// <returns>The rate per overdue day, in <see cref="FineOptions.Currency"/>.</returns>
 public delegate decimal FineRateResolver();
+
+/// <summary>
+/// Supplies the currency code fine amounts are expressed in.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A second delegate rather than widening <see cref="FineRateResolver"/> to
+/// return a pair. The fine handler needs only the rate and should not be handed
+/// a currency it has no use for; the fine <i>report</i> needs only the currency
+/// and never the rate. Two narrow dependencies say more about what each caller
+/// actually uses than one wide one.
+/// </para>
+/// <para>
+/// It exists at all because <c>Library.Application</c> has no configuration
+/// reference — that was removed once nothing needed it — so a report here cannot
+/// read <c>IOptions&lt;FineOptions&gt;</c>. Infrastructure binds the options and
+/// supplies this delegate, which is the same inversion <see cref="FineRateResolver"/>
+/// uses.
+/// </para>
+/// </remarks>
+/// <returns>An ISO 4217 code, for display only.</returns>
+public delegate string FineCurrencyResolver();

@@ -48,6 +48,12 @@ public static class DependencyInjection
         services.AddScoped<Loans.ILoanService, Loans.LoanService>();
         services.AddScoped<Loans.IFineService, Loans.FineService>();
         services.AddScoped<Books.Import.IBookImportService, Books.Import.BookImportService>();
+        services.AddScoped<Reports.IReportService, Reports.ReportService>();
+
+        // Stateless and thread-safe: the encoder holds no state and is called on
+        // every field of every export, so one instance is right.
+        services.AddSingleton<
+            Reports.Export.ICsvFieldEncoder, Reports.Export.CsvFieldEncoder>();
 
         // Handlers are resolved by the dispatcher from the closed interface type,
         // so each must be registered against IDomainEventHandler<TEvent> and not
